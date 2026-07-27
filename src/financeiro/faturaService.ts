@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { StatusContrato, StatusFatura } from "../lib/status";
 import { calcularMultaEJuros } from "./calculoAtraso";
+import { AppError } from "../lib/errors";
 
 export function competenciaDe(data: Date): string {
   const ano = data.getFullYear();
@@ -24,7 +25,7 @@ export async function gerarFaturaMensal(
 ) {
   const contrato = await prisma.contrato.findUniqueOrThrow({ where: { id: contratoId } });
   if (contrato.status !== StatusContrato.ATIVO) {
-    throw new Error("Contrato não está ativo");
+    throw new AppError(409, "Contrato não está ativo");
   }
 
   const competencia = competenciaDe(referencia);
@@ -49,14 +50,24 @@ export async function gerarFaturaMensal(
   });
 }
 
-/** Gera a fatura do mês corrente para todos os contratos ativos que ainda não a possuem. */
+/**
+ * Gera a fatura do mês corrente para todos os contratos ativos que ainda não a possuem.
+ * A falha em um contrato não interrompe o processamento dos demais.
+ */
 export async function gerarFaturasDoMes(prisma: PrismaClient, referencia: Date = new Date()) {
   const contratosAtivos = await prisma.contrato.findMany({ where: { status: StatusContrato.ATIVO } });
   const faturas = [];
+  const erros: { contratoId: string; erro: string }[] = [];
+
   for (const contrato of contratosAtivos) {
-    faturas.push(await gerarFaturaMensal(prisma, contrato.id, referencia));
+    try {
+      faturas.push(await gerarFaturaMensal(prisma, contrato.id, referencia));
+    } catch (err) {
+      erros.push({ contratoId: contrato.id, erro: (err as Error).message });
+    }
   }
-  return faturas;
+
+  return { faturas, erros };
 }
 
 /**

@@ -15,29 +15,27 @@ import {
 
 export const router = Router();
 
+const idSchema = z.string().min(1).max(64);
+
 const filtroSchema = z.object({
-  competenciaInicio: z.string().optional(),
-  competenciaFim: z.string().optional(),
-  imovel: z.string().optional(),
-  inquilinoId: z.string().optional(),
+  competenciaInicio: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+  competenciaFim: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+  imovel: z.string().max(200).optional(),
+  inquilinoId: idSchema.optional(),
 });
 
-function filtroDaQuery(query: unknown) {
-  return filtroSchema.parse(query);
-}
+// Express 5 encaminha automaticamente rejeições de Promise (inclusive de z.parse) para o
+// middleware de erro central — não é necessário try/catch em cada rota.
 
 router.post("/faturas/gerar/:contratoId", async (req, res) => {
-  try {
-    const fatura = await gerarFaturaMensal(prisma, req.params.contratoId);
-    res.status(201).json(fatura);
-  } catch (err) {
-    res.status(400).json({ erro: (err as Error).message });
-  }
+  const contratoId = idSchema.parse(req.params.contratoId);
+  const fatura = await gerarFaturaMensal(prisma, contratoId);
+  res.status(201).json(fatura);
 });
 
 router.post("/faturas/gerar-mes", async (_req, res) => {
-  const faturas = await gerarFaturasDoMes(prisma);
-  res.status(201).json(faturas);
+  const resultado = await gerarFaturasDoMes(prisma);
+  res.status(201).json(resultado);
 });
 
 router.post("/faturas/marcar-atrasadas", async (_req, res) => {
@@ -45,37 +43,39 @@ router.post("/faturas/marcar-atrasadas", async (_req, res) => {
   res.json(atualizadas);
 });
 
+const METODOS_PAGAMENTO = ["PIX", "BOLETO", "DINHEIRO", "CARTAO", "TRANSFERENCIA"] as const;
+
 const pagamentoSchema = z.object({
-  valorPago: z.number().positive(),
-  metodo: z.string().min(1),
-  registradoPor: z.string().min(1),
-  observacao: z.string().optional(),
+  valorPago: z.number().positive().finite().max(1_000_000_000),
+  metodo: z.enum(METODOS_PAGAMENTO),
+  registradoPor: z.string().min(1).max(120).optional(),
+  observacao: z.string().max(500).optional(),
 });
 
 router.post("/faturas/:faturaId/pagamentos", async (req, res) => {
-  try {
-    const body = pagamentoSchema.parse(req.body);
-    const resultado = await registrarPagamento(prisma, { faturaId: req.params.faturaId, ...body });
-    res.status(201).json(resultado);
-  } catch (err) {
-    res.status(400).json({ erro: (err as Error).message });
-  }
+  const faturaId = idSchema.parse(req.params.faturaId);
+  const body = pagamentoSchema.parse(req.body);
+  // A auditoria usa sempre o operador autenticado; o campo do corpo, se enviado, é ignorado.
+  const registradoPor = req.usuario ?? body.registradoPor ?? "desconhecido";
+
+  const resultado = await registrarPagamento(prisma, { faturaId, ...body, registradoPor });
+  res.status(201).json(resultado);
 });
 
 router.get("/dashboard/receitas", async (req, res) => {
-  res.json(await receitas(prisma, filtroDaQuery(req.query)));
+  res.json(await receitas(prisma, filtroSchema.parse(req.query)));
 });
 
 router.get("/dashboard/inadimplencia", async (req, res) => {
-  res.json(await inadimplencia(prisma, filtroDaQuery(req.query)));
+  res.json(await inadimplencia(prisma, filtroSchema.parse(req.query)));
 });
 
 router.get("/dashboard/a-receber", async (req, res) => {
-  res.json(await aReceber(prisma, filtroDaQuery(req.query)));
+  res.json(await aReceber(prisma, filtroSchema.parse(req.query)));
 });
 
 router.get("/dashboard/contratos-vencendo", async (req, res) => {
-  const dias = req.query.dias ? Number(req.query.dias) : undefined;
+  const dias = req.query.dias ? z.coerce.number().int().min(1).max(3650).parse(req.query.dias) : undefined;
   res.json(await contratosVencendo(prisma, dias));
 });
 
@@ -88,6 +88,7 @@ router.get("/dashboard/resumo", async (_req, res) => {
 });
 
 router.get("/dashboard/inquilinos/:inquilinoId/status-periodo", async (req, res) => {
+  const inquilinoId = idSchema.parse(req.params.inquilinoId);
   const granularidade = req.query.granularidade === "semana" ? "semana" : "mes";
-  res.json(await statusPorPeriodoInquilino(prisma, req.params.inquilinoId, granularidade));
+  res.json(await statusPorPeriodoInquilino(prisma, inquilinoId, granularidade));
 });

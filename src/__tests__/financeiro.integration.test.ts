@@ -1,6 +1,6 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { PrismaClient } from "@prisma/client";
-import { gerarFaturaMensal, marcarFaturasAtrasadas } from "../financeiro/faturaService";
+import { gerarFaturaMensal, gerarFaturasDoMes, marcarFaturasAtrasadas } from "../financeiro/faturaService";
 import { registrarPagamento } from "../financeiro/pagamentoService";
 import { inadimplencia, receitas, statusPorPeriodoInquilino } from "../dashboard/dashboardService";
 
@@ -133,5 +133,74 @@ describe("fluxo de fatura e pagamento", () => {
     expect(status).toHaveLength(1);
     expect(status[0].status).toBe("PENDENTE");
     expect(status[0].periodo).toMatch(/^2026-W\d{2}$/);
+  });
+
+  it("rejeita pagamento com valor menor que o total da fatura", async () => {
+    const contrato = await criarContrato();
+    const fatura = await gerarFaturaMensal(prisma, contrato.id, new Date("2026-07-01"));
+
+    await expect(
+      registrarPagamento(prisma, {
+        faturaId: fatura.id,
+        valorPago: 1,
+        metodo: "PIX",
+        registradoPor: "matheus",
+      })
+    ).rejects.toThrow(/menor que o valor total/);
+
+    const faturaInalterada = await prisma.fatura.findUniqueOrThrow({ where: { id: fatura.id } });
+    expect(faturaInalterada.status).toBe("PENDENTE");
+  });
+
+  it("aceita pagamento com diferença de centavos por arredondamento", async () => {
+    const contrato = await criarContrato({ diaVencimento: 5 });
+    const fatura = await gerarFaturaMensal(prisma, contrato.id, new Date("2026-07-01"));
+    await marcarFaturasAtrasadas(prisma, new Date("2026-07-10"));
+    const faturaAtrasada = await prisma.fatura.findUniqueOrThrow({ where: { id: fatura.id } });
+
+    const { fatura: faturaPaga } = await registrarPagamento(prisma, {
+      faturaId: fatura.id,
+      valorPago: faturaAtrasada.valorTotal - 0.005,
+      metodo: "PIX",
+      registradoPor: "matheus",
+    });
+
+    expect(faturaPaga.status).toBe("PAGO");
+  });
+
+  it("isola falha de um contrato ao gerar faturas do mês, sem derrubar os demais", async () => {
+    const contratoValido = await criarContrato({ diaVencimento: 5 });
+    const inquilinoProblema = await prisma.inquilino.create({ data: { nome: "Contrato Problemático" } });
+    const contratoProblema = await prisma.contrato.create({
+      data: {
+        inquilinoId: inquilinoProblema.id,
+        imovel: "Apto 202",
+        valorAluguel: 800,
+        diaVencimento: 10,
+        dataInicio: new Date("2026-01-01"),
+        dataFim: new Date("2027-01-01"),
+        status: "ATIVO",
+      },
+    });
+
+    // Remove o contrato problemático da tabela real depois que a listagem de "ativos"
+    // já o incluiu, forçando uma falha real (registro sumiu) isolada no meio do lote —
+    // simula, por exemplo, uma exclusão concorrente ou erro transitório de banco.
+    const findManyOriginal = prisma.contrato.findMany.bind(prisma.contrato);
+    const espiao = vi
+      .spyOn(prisma.contrato, "findMany")
+      .mockImplementationOnce((async (args: Parameters<typeof findManyOriginal>[0]) => {
+        const contratos = await findManyOriginal(args);
+        await prisma.contrato.delete({ where: { id: contratoProblema.id } });
+        return contratos;
+      }) as typeof findManyOriginal);
+
+    const resultado = await gerarFaturasDoMes(prisma, new Date("2026-07-01"));
+    espiao.mockRestore();
+
+    expect(resultado.faturas).toHaveLength(1);
+    expect(resultado.faturas[0].contratoId).toBe(contratoValido.id);
+    expect(resultado.erros).toHaveLength(1);
+    expect(resultado.erros[0].contratoId).toBe(contratoProblema.id);
   });
 });
