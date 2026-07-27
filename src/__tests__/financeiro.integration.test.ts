@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { gerarFaturaMensal, marcarFaturasAtrasadas } from "../financeiro/faturaService";
 import { registrarPagamento } from "../financeiro/pagamentoService";
-import { inadimplencia, receitas } from "../dashboard/dashboardService";
+import { inadimplencia, receitas, statusPorPeriodoInquilino } from "../dashboard/dashboardService";
 
 const prisma = new PrismaClient();
 
@@ -101,5 +101,37 @@ describe("fluxo de fatura e pagamento", () => {
     await expect(
       registrarPagamento(prisma, { faturaId: fatura.id, valorPago: 1000, metodo: "PIX", registradoPor: "matheus" })
     ).rejects.toThrow("Fatura já está paga");
+  });
+
+  it("agrupa faturas do inquilino por mês e por status", async () => {
+    const contrato = await criarContrato({ diaVencimento: 5 });
+    await gerarFaturaMensal(prisma, contrato.id, new Date("2026-06-01"));
+    const faturaJulho = await gerarFaturaMensal(prisma, contrato.id, new Date("2026-07-01"));
+    await registrarPagamento(prisma, {
+      faturaId: faturaJulho.id,
+      valorPago: 1000,
+      metodo: "PIX",
+      registradoPor: "matheus",
+    });
+
+    const status = await statusPorPeriodoInquilino(prisma, contrato.inquilinoId, "mes");
+
+    expect(status).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ periodo: "2026-06", status: "PENDENTE", quantidade: 1 }),
+        expect.objectContaining({ periodo: "2026-07", status: "PAGO", quantidade: 1 }),
+      ])
+    );
+  });
+
+  it("agrupa faturas do inquilino por semana ISO", async () => {
+    const contrato = await criarContrato({ diaVencimento: 5 });
+    await gerarFaturaMensal(prisma, contrato.id, new Date("2026-07-01"));
+
+    const status = await statusPorPeriodoInquilino(prisma, contrato.inquilinoId, "semana");
+
+    expect(status).toHaveLength(1);
+    expect(status[0].status).toBe("PENDENTE");
+    expect(status[0].periodo).toMatch(/^2026-W\d{2}$/);
   });
 });

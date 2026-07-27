@@ -10,6 +10,7 @@ import {
   inadimplencia,
   receitas,
   resumoAcaoRapida,
+  statusPorPeriodoInquilino,
 } from "./dashboard/dashboardService";
 
 export const router = Router();
@@ -84,4 +85,9 @@ router.get("/dashboard/faturas-atrasadas-recentemente", async (_req, res) => {
 
 router.get("/dashboard/resumo", async (_req, res) => {
   res.json(await resumoAcaoRapida(prisma));
+});
+
+router.get("/dashboard/inquilinos/:inquilinoId/status-periodo", async (req, res) => {
+  const granularidade = req.query.granularidade === "semana" ? "semana" : "mes";
+  res.json(await statusPorPeriodoInquilino(prisma, req.params.inquilinoId, granularidade));
 });

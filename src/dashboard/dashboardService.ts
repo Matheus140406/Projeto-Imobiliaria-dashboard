@@ -85,6 +85,58 @@ export async function faturasAtrasadasRecentemente(prisma: PrismaClient) {
   });
 }
 
+function competenciaDaData(data: Date): string {
+  return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Semana ISO (ano-Wsemana) de uma data, usada para agrupar faturas por semana. */
+function semanaIsoDaData(data: Date): string {
+  const referencia = new Date(Date.UTC(data.getFullYear(), data.getMonth(), data.getDate()));
+  const diaSemana = referencia.getUTCDay() || 7;
+  referencia.setUTCDate(referencia.getUTCDate() + 4 - diaSemana);
+  const inicioAno = new Date(Date.UTC(referencia.getUTCFullYear(), 0, 1));
+  const semana = Math.ceil(((referencia.getTime() - inicioAno.getTime()) / 86400000 + 1) / 7);
+  return `${referencia.getUTCFullYear()}-W${String(semana).padStart(2, "0")}`;
+}
+
+export interface StatusPorPeriodoItem {
+  periodo: string;
+  status: string;
+  quantidade: number;
+  total: number;
+}
+
+/**
+ * Agrupa faturas de um inquilino por status e por período (semana ou mês),
+ * usando a data de vencimento como referência.
+ */
+export async function statusPorPeriodoInquilino(
+  prisma: PrismaClient,
+  inquilinoId: string,
+  granularidade: "semana" | "mes" = "mes"
+): Promise<StatusPorPeriodoItem[]> {
+  const faturas = await prisma.fatura.findMany({
+    where: { contrato: { inquilinoId } },
+    orderBy: { dataVencimento: "asc" },
+  });
+
+  const agrupado = new Map<string, StatusPorPeriodoItem>();
+  for (const fatura of faturas) {
+    const periodo =
+      granularidade === "semana"
+        ? semanaIsoDaData(fatura.dataVencimento)
+        : competenciaDaData(fatura.dataVencimento);
+    const chave = `${periodo}|${fatura.status}`;
+
+    const atual = agrupado.get(chave) ?? { periodo, status: fatura.status, quantidade: 0, total: 0 };
+    atual.quantidade += 1;
+    atual.total += fatura.valorTotal;
+    agrupado.set(chave, atual);
+  }
+
+  return Array.from(agrupado.values()).sort((a, b) => a.periodo.localeCompare(b.periodo));
+}
+
 /** Visão consolidada para ações rápidas no topo do dashboard. */
 export async function resumoAcaoRapida(prisma: PrismaClient) {
   const [rec, inad, receber, vencendo, atrasadasOntem] = await Promise.all([
