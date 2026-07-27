@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "crypto";
+import { createHash, timingSafeEqual } from "crypto";
 import type { NextFunction, Request, Response } from "express";
 
 declare global {
@@ -11,11 +11,18 @@ declare global {
   }
 }
 
+const TAMANHO_MAX_USUARIO = 120;
+
+function hash(valor: string): Buffer {
+  return createHash("sha256").update(valor, "utf8").digest();
+}
+
+/**
+ * Compara em tempo constante independente do tamanho das entradas: comparar os hashes
+ * (sempre 32 bytes) evita que o tempo de resposta vaze até o comprimento da chave real.
+ */
 function comparaEmTempoConstante(a: string, b: string): boolean {
-  const bufferA = Buffer.from(a);
-  const bufferB = Buffer.from(b);
-  if (bufferA.length !== bufferB.length) return false;
-  return timingSafeEqual(bufferA, bufferB);
+  return timingSafeEqual(hash(a), hash(b));
 }
 
 /**
@@ -30,7 +37,10 @@ export function autenticar(apiKey: string) {
       res.status(401).json({ erro: "Não autorizado" });
       return;
     }
-    req.usuario = req.header("x-usuario")?.trim() || "desconhecido";
+    const usuarioBruto = req.header("x-usuario")?.trim();
+    req.usuario = usuarioBruto
+      ? usuarioBruto.replace(/[\r\n\t]/g, " ").slice(0, TAMANHO_MAX_USUARIO)
+      : "desconhecido";
     next();
   };
 }

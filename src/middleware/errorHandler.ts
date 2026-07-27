@@ -5,7 +5,14 @@ import { AppError } from "../lib/errors";
 
 /** Handler central: loga o erro real no servidor e responde ao cliente só com o necessário. */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function tratadorDeErros(err: unknown, _req: Request, res: Response, _next: NextFunction) {
+export function tratadorDeErros(err: unknown, _req: Request, res: Response, next: NextFunction) {
+  // Se a resposta já começou a ser enviada, não dá mais para trocar o status/corpo —
+  // delega ao handler de erro padrão do Express, como a própria documentação recomenda.
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+
   if (err instanceof AppError) {
     res.status(err.statusCode).json({ erro: err.message });
     return;

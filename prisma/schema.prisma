@@ -34,6 +34,9 @@ model Contrato {
   status            String         @default("ATIVO")
   faturas           Fatura[]
   createdAt          DateTime       @default(now())
+
+  @@index([inquilinoId])
+  @@index([status])
 }
 
 model Fatura {
@@ -66,6 +69,8 @@ model Pagamento {
   registradoPor  String
   observacao     String?
   createdAt      DateTime @default(now())
+
+  @@index([faturaId])
 }
 
 model AuditoriaPagamento {
@@ -75,4 +80,6 @@ model AuditoriaPagamento {
   detalhes   String
   usuario    String
   createdAt  DateTime @default(now())
+
+  @@index([faturaId])
 }

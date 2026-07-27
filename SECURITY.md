@@ -6,7 +6,10 @@ credenciais ou acesso indevido ao servidor.
 ## Autenticação
 
 - Toda rota sob `/api` exige o header `x-api-key`, comparado em **tempo
-  constante** (`crypto.timingSafeEqual`) para evitar timing attacks.
+  constante** sobre o **hash SHA-256** das duas chaves (não sobre a string
+  crua), para que nem o comprimento da chave real vaze pelo tempo de resposta.
+- `x-usuario` é sanitizado (remove quebras de linha) e truncado em 120
+  caracteres antes de virar registro de auditoria.
 - Não há sistema de usuários ainda (isso é escopo do Edu). Até lá, o header
   `x-usuario` identifica o operador para fins de auditoria, mas só é aceito
   junto com uma API key válida — **não é autenticação real**, é um rótulo.
@@ -28,6 +31,19 @@ credenciais ou acesso indevido ao servidor.
 - Erros de negócio (`AppError`) retornam mensagem clara; erros inesperados
   (bug, falha de banco) retornam **apenas** `"Erro interno"` — detalhes reais
   vão só para o log do servidor, nunca para o cliente.
+- **Regra "vencimento + 1 dia < hoje" corrigida**: o cron só marca `ATRASADO`
+  a partir de 2 dias corridos após o vencimento (antes marcava 1 dia mais
+  cedo, violando a carência combinada).
+- **Scoring usa a data real do pagamento**, não o campo `status` da fatura:
+  antes, pagar uma fatura vencida *antes* do cron da madrugada rodar
+  (portanto ainda `PENDENTE` no banco) pontuava como pagamento em dia.
+- **`gerarFaturaMensal` é seguro sob concorrência**: duas chamadas
+  simultâneas para o mesmo contrato/competência (ex.: API e cron ao mesmo
+  tempo) não derrubam uma delas com erro de unicidade — a perdedora da
+  corrida recebe de volta a fatura já criada pela outra.
+- Validação de `valorPago` (finito, > 0) também existe dentro do
+  `pagamentoService`, não só no zod da rota — protege chamadas diretas ao
+  service (jobs, scripts, testes).
 
 ## Hardening HTTP
 

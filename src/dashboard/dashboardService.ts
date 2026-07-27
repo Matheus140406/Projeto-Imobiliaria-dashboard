@@ -62,7 +62,10 @@ export async function aReceber(prisma: PrismaClient, filtro: FiltroDashboard = {
 
 /** Contratos ativos cujo término está dentro dos próximos `diasLimite` dias. */
 export async function contratosVencendo(prisma: PrismaClient, diasLimite = 30) {
+  // Zera a hora para não excluir contratos que vencem "hoje" dependendo do horário
+  // em que a rota é chamada (dataFim é armazenada à meia-noite).
   const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
   const limite = new Date(hoje);
   limite.setDate(limite.getDate() + diasLimite);
 

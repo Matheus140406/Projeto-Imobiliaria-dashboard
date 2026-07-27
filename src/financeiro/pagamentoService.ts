@@ -23,6 +23,12 @@ const TOLERANCIA_CENTAVOS = 0.01;
  * scoring do inquilino conforme o status da fatura no momento do pagamento.
  */
 export async function registrarPagamento(prisma: PrismaClient, input: RegistrarPagamentoInput) {
+  // Validação defensiva independente da camada HTTP: este service pode ser chamado
+  // diretamente (jobs, scripts, testes) sem passar pelo zod das rotas.
+  if (!Number.isFinite(input.valorPago) || input.valorPago <= 0) {
+    throw new AppError(422, "valorPago deve ser um número finito maior que zero");
+  }
+
   return prisma.$transaction(async (tx) => {
     const fatura = await tx.fatura.findUniqueOrThrow({
       where: { id: input.faturaId },
@@ -58,7 +64,13 @@ export async function registrarPagamento(prisma: PrismaClient, input: RegistrarP
       data: { status: StatusFatura.PAGO },
     });
 
-    const pontos = fatura.status === StatusFatura.ATRASADO ? PONTOS_PAGAMENTO_ATRASADO : PONTOS_PAGAMENTO_EM_DIA;
+    // O scoring usa a data de vencimento real, não o campo `status` da fatura: se o
+    // pagamento ocorrer antes do cron da madrugada rodar, uma fatura já vencida ontem
+    // ainda estaria como PENDENTE no banco e pontuaria como "em dia" indevidamente.
+    const dataEfetivaDoPagamento = input.dataPagamento ?? new Date();
+    const estaAtrasado =
+      fatura.status === StatusFatura.ATRASADO || dataEfetivaDoPagamento > fatura.dataVencimento;
+    const pontos = estaAtrasado ? PONTOS_PAGAMENTO_ATRASADO : PONTOS_PAGAMENTO_EM_DIA;
     await tx.inquilino.update({
       where: { id: fatura.contrato.inquilinoId },
       data: { scoring: { increment: pontos } },
