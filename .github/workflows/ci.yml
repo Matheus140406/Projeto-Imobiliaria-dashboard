@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: "file:./dev.db"
+      API_KEY: "ci-0000000000000000000000000000000000000000000000000000000000"
+      JWT_SECRET: "ci-jwt-0000000000000000000000000000000000000000000000000000"
+      NODE_ENV: "test"
+      PORT: "3000"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Instala dependências
+        run: npm ci
+
+      - name: Aplica migrations no banco de teste
+        run: npx prisma migrate deploy
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Testes
+        run: npx vitest run
+
+      - name: Build de produção
+        run: npm run build

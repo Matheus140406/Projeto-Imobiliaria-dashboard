@@ -8,71 +8,186 @@ datasource db {
 }
 
 // SQLite não suporta enums nativos: status são strings restritas em código
-// (ver src/lib/status.ts) para StatusFatura e StatusContrato.
+// (ver src/lib/status.ts) para StatusFatura, StatusContrato, StatusImovel e TipoGarantia.
+//
+// Todo campo monetário é Int e representa CENTAVOS, nunca reais (ver src/lib/dinheiro.ts).
+// Isso evita erro de arredondamento de ponto flutuante em somas/multiplicações repetidas.
+
+model Usuario {
+  id        String   @id @default(cuid())
+  nome      String
+  email     String   @unique
+  senhaHash String
+  // "ADMIN" (tudo, inclusive excluir/encerrar) ou "OPERADOR" (uso diário: criar,
+  // listar, registrar pagamento — não pode excluir cadastros nem encerrar contrato).
+  papel     String   @default("OPERADOR")
+  ativo     Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
 
 model Inquilino {
   id        String     @id @default(cuid())
   nome      String
-  email     String?
+  cpf       String     @unique
+  email     String?    @unique
   telefone  String?
   scoring   Int        @default(0)
   contratos Contrato[]
   createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  deletedAt DateTime?
+
+  @@index([deletedAt])
+}
+
+model Fiador {
+  id        String     @id @default(cuid())
+  nome      String
+  cpf       String     @unique
+  ativo     Boolean    @default(true)
+  contratos Contrato[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  deletedAt DateTime?
+
+  @@index([deletedAt])
+}
+
+model Imovel {
+  id              String     @id @default(cuid())
+  endereco        String
+  valorPadrao     Int
+  // Valor mensal do IPTU do imóvel (opcional). Se preenchido e o contrato
+  // atribuir a responsabilidade ao inquilino, faturas de IPTU são geradas
+  // junto com as de aluguel (ver Contrato.responsavelIptu).
+  valorIptuMensal Int?
+  status          String     @default("DISPONIVEL")
+  contratos       Contrato[]
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  deletedAt       DateTime?
+
+  @@index([status])
+  @@index([deletedAt])
 }
 
 model Contrato {
-  id                String         @id @default(cuid())
-  inquilino         Inquilino      @relation(fields: [inquilinoId], references: [id])
-  inquilinoId       String
-  imovel            String
-  valorAluguel       Float
-  diaVencimento     Int
-  percentualMulta   Float          @default(2)
-  taxaJurosDiaria   Float          @default(0.033)
-  dataInicio        DateTime
-  dataFim           DateTime
-  status            String         @default("ATIVO")
-  faturas           Fatura[]
-  createdAt          DateTime       @default(now())
+  id              String     @id @default(cuid())
+  inquilino       Inquilino  @relation(fields: [inquilinoId], references: [id])
+  inquilinoId     String
+  imovel          Imovel     @relation(fields: [imovelId], references: [id])
+  imovelId        String
+  fiador          Fiador?    @relation(fields: [fiadorId], references: [id])
+  fiadorId        String?
+  valorAluguel    Int
+  diaVencimento   Int
+  percentualMulta Float      @default(2)
+  taxaJurosDiaria Float      @default(0.033)
+  tipoGarantia    String
+  valorCaucao     Int?
+  // Quem paga o IPTU do imóvel durante a vigência: "INQUILINO" ou "PROPRIETARIO".
+  // Só gera fatura de IPTU (ver Fatura.tipo) quando for INQUILINO e o imóvel
+  // tiver valorIptuMensal preenchido.
+  responsavelIptu String     @default("INQUILINO")
+  dataInicio      DateTime
+  dataFim         DateTime
+  status          String     @default("ATIVO")
+  faturas         Fatura[]
+  aditivos        Aditivo[]
+  // Contrato do qual este é a renovação, e o contrato que renovou este (1:1 opcional).
+  renovadoDeId    String?    @unique
+  renovadoDe      Contrato?  @relation("RenovacaoContrato", fields: [renovadoDeId], references: [id])
+  renovadoPor     Contrato?  @relation("RenovacaoContrato")
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  deletedAt       DateTime?
+
+  @@index([inquilinoId])
+  @@index([imovelId])
+  @@index([fiadorId])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+// Aditivo contratual: registra um ajuste (reajuste de aluguel e/ou de dia de
+// vencimento) a partir de uma data de vigência, sem alterar faturas já geradas —
+// só as pendentes futuras são recalculadas com o novo valor.
+model Aditivo {
+  id                String   @id @default(cuid())
+  contrato          Contrato @relation(fields: [contratoId], references: [id])
+  contratoId        String
+  dataVigencia      DateTime
+  novoValorAluguel  Int?
+  novoDiaVencimento Int?
+  motivo            String?
+  criadoPor         String
+  createdAt         DateTime @default(now())
+
+  @@index([contratoId])
 }
 
 model Fatura {
-  id              String        @id @default(cuid())
-  contrato        Contrato      @relation(fields: [contratoId], references: [id])
-  contratoId      String
-  competencia     String
-  valorOriginal   Float
-  valorMulta      Float         @default(0)
-  valorJuros      Float         @default(0)
-  valorTotal      Float
-  dataVencimento  DateTime
-  status          String        @default("PENDENTE")
-  pagamentos      Pagamento[]
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id             String      @id @default(cuid())
+  contrato       Contrato    @relation(fields: [contratoId], references: [id])
+  contratoId     String
+  competencia    String
+  // "ALUGUEL" (padrão) ou "IPTU" — faturas de IPTU usam o mesmo motor de
+  // geração/atraso/pagamento, só o valor de origem e o rótulo mudam.
+  tipo           String      @default("ALUGUEL")
+  valorOriginal  Int
+  valorMulta     Int         @default(0)
+  valorJuros     Int         @default(0)
+  valorTotal     Int
+  dataVencimento DateTime
+  status         String      @default("PENDENTE")
+  pagamentos     Pagamento[]
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
-  @@unique([contratoId, competencia])
+  @@unique([contratoId, competencia, tipo])
   @@index([status])
   @@index([dataVencimento])
+  @@index([tipo])
 }
 
 model Pagamento {
-  id             String   @id @default(cuid())
-  fatura         Fatura   @relation(fields: [faturaId], references: [id])
-  faturaId       String
-  valorPago      Float
-  dataPagamento  DateTime @default(now())
-  metodo         String
-  registradoPor  String
-  observacao     String?
-  createdAt      DateTime @default(now())
+  id            String   @id @default(cuid())
+  fatura        Fatura   @relation(fields: [faturaId], references: [id])
+  faturaId      String
+  valorPago     Int
+  dataPagamento DateTime @default(now())
+  metodo        String
+  registradoPor String
+  observacao    String?
+  createdAt     DateTime @default(now())
+
+  @@index([faturaId])
 }
 
 model AuditoriaPagamento {
+  id        String   @id @default(cuid())
+  faturaId  String
+  acao      String
+  detalhes  String
+  usuario   String
+  createdAt DateTime @default(now())
+
+  @@index([faturaId])
+}
+
+// Log genérico de atividade: quem fez o quê e quando, em qualquer cadastro
+// (inquilino, fiador, imóvel, contrato). Complementa AuditoriaPagamento, que
+// é específica de pagamentos.
+model LogAtividade {
   id         String   @id @default(cuid())
-  faturaId   String
+  entidade   String
+  entidadeId String
   acao       String
-  detalhes   String
   usuario    String
+  detalhes   String?
   createdAt  DateTime @default(now())
+
+  @@index([entidade, entidadeId])
+  @@index([createdAt])
 }
