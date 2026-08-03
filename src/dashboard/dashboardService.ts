@@ -4,7 +4,7 @@ import { StatusFatura } from "../lib/status";
 export interface FiltroDashboard {
   competenciaInicio?: string;
   competenciaFim?: string;
-  imovel?: string;
+  imovelId?: string;
   inquilinoId?: string;
 }
 
@@ -18,10 +18,10 @@ function aplicarFiltros(filtro: FiltroDashboard) {
           },
         }
       : {}),
-    ...(filtro.imovel || filtro.inquilinoId
+    ...(filtro.imovelId || filtro.inquilinoId
       ? {
           contrato: {
-            ...(filtro.imovel ? { imovel: filtro.imovel } : {}),
+            ...(filtro.imovelId ? { imovelId: filtro.imovelId } : {}),
             ...(filtro.inquilinoId ? { inquilinoId: filtro.inquilinoId } : {}),
           },
         }

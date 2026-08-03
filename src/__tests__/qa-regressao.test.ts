@@ -14,16 +14,27 @@ async function limparBanco() {
   await prisma.fatura.deleteMany();
   await prisma.contrato.deleteMany();
   await prisma.inquilino.deleteMany();
+  await prisma.imovel.deleteMany();
+  await prisma.fiador.deleteMany();
+}
+
+let contadorCpf = 0;
+function proximoCpfDeTeste(): string {
+  contadorCpf += 1;
+  return String(20000000000 + contadorCpf).padStart(11, "0");
 }
 
 async function criarContrato(overrides: Partial<{ diaVencimento: number; dataFim: Date }> = {}) {
-  const inquilino = await prisma.inquilino.create({ data: { nome: "Inquilino QA" } });
+  const inquilino = await prisma.inquilino.create({ data: { nome: "Inquilino QA", cpf: proximoCpfDeTeste() } });
+  const imovel = await prisma.imovel.create({ data: { endereco: "Apto QA", valorPadrao: 1000 } });
   return prisma.contrato.create({
     data: {
       inquilinoId: inquilino.id,
-      imovel: "Apto QA",
+      imovelId: imovel.id,
       valorAluguel: 1000,
       diaVencimento: overrides.diaVencimento ?? 5,
+      tipoGarantia: "CAUCAO",
+      valorCaucao: 3000,
       dataInicio: new Date("2026-01-01"),
       dataFim: overrides.dataFim ?? new Date("2027-01-01"),
     },

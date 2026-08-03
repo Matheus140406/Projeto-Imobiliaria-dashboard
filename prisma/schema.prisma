@@ -8,51 +8,93 @@ datasource db {
 }
 
 // SQLite não suporta enums nativos: status são strings restritas em código
-// (ver src/lib/status.ts) para StatusFatura e StatusContrato.
+// (ver src/lib/status.ts) para StatusFatura, StatusContrato, StatusImovel e TipoGarantia.
 
 model Inquilino {
   id        String     @id @default(cuid())
   nome      String
-  email     String?
+  cpf       String     @unique
+  email     String?    @unique
   telefone  String?
   scoring   Int        @default(0)
   contratos Contrato[]
   createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  deletedAt DateTime?
+
+  @@index([deletedAt])
+}
+
+model Fiador {
+  id        String     @id @default(cuid())
+  nome      String
+  cpf       String     @unique
+  ativo     Boolean    @default(true)
+  contratos Contrato[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  deletedAt DateTime?
+
+  @@index([deletedAt])
+}
+
+model Imovel {
+  id          String     @id @default(cuid())
+  endereco    String
+  valorPadrao Float
+  status      String     @default("DISPONIVEL")
+  contratos   Contrato[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  deletedAt   DateTime?
+
+  @@index([status])
+  @@index([deletedAt])
 }
 
 model Contrato {
-  id                String         @id @default(cuid())
-  inquilino         Inquilino      @relation(fields: [inquilinoId], references: [id])
-  inquilinoId       String
-  imovel            String
-  valorAluguel       Float
-  diaVencimento     Int
-  percentualMulta   Float          @default(2)
-  taxaJurosDiaria   Float          @default(0.033)
-  dataInicio        DateTime
-  dataFim           DateTime
-  status            String         @default("ATIVO")
-  faturas           Fatura[]
-  createdAt          DateTime       @default(now())
+  id              String     @id @default(cuid())
+  inquilino       Inquilino  @relation(fields: [inquilinoId], references: [id])
+  inquilinoId     String
+  imovel          Imovel     @relation(fields: [imovelId], references: [id])
+  imovelId        String
+  fiador          Fiador?    @relation(fields: [fiadorId], references: [id])
+  fiadorId        String?
+  valorAluguel    Float
+  diaVencimento   Int
+  percentualMulta Float      @default(2)
+  taxaJurosDiaria Float      @default(0.033)
+  tipoGarantia    String
+  valorCaucao     Float?
+  dataInicio      DateTime
+  dataFim         DateTime
+  status          String     @default("ATIVO")
+  faturas         Fatura[]
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  deletedAt       DateTime?
 
   @@index([inquilinoId])
+  @@index([imovelId])
+  @@index([fiadorId])
   @@index([status])
+  @@index([deletedAt])
 }
 
 model Fatura {
-  id              String        @id @default(cuid())
-  contrato        Contrato      @relation(fields: [contratoId], references: [id])
-  contratoId      String
-  competencia     String
-  valorOriginal   Float
-  valorMulta      Float         @default(0)
-  valorJuros      Float         @default(0)
-  valorTotal      Float
-  dataVencimento  DateTime
-  status          String        @default("PENDENTE")
-  pagamentos      Pagamento[]
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  id             String      @id @default(cuid())
+  contrato       Contrato    @relation(fields: [contratoId], references: [id])
+  contratoId     String
+  competencia    String
+  valorOriginal  Float
+  valorMulta     Float       @default(0)
+  valorJuros     Float       @default(0)
+  valorTotal     Float
+  dataVencimento DateTime
+  status         String      @default("PENDENTE")
+  pagamentos     Pagamento[]
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
 
   @@unique([contratoId, competencia])
   @@index([status])
@@ -60,26 +102,26 @@ model Fatura {
 }
 
 model Pagamento {
-  id             String   @id @default(cuid())
-  fatura         Fatura   @relation(fields: [faturaId], references: [id])
-  faturaId       String
-  valorPago      Float
-  dataPagamento  DateTime @default(now())
-  metodo         String
-  registradoPor  String
-  observacao     String?
-  createdAt      DateTime @default(now())
+  id            String   @id @default(cuid())
+  fatura        Fatura   @relation(fields: [faturaId], references: [id])
+  faturaId      String
+  valorPago     Float
+  dataPagamento DateTime @default(now())
+  metodo        String
+  registradoPor String
+  observacao    String?
+  createdAt     DateTime @default(now())
 
   @@index([faturaId])
 }
 
 model AuditoriaPagamento {
-  id         String   @id @default(cuid())
-  faturaId   String
-  acao       String
-  detalhes   String
-  usuario    String
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  faturaId  String
+  acao      String
+  detalhes  String
+  usuario   String
+  createdAt DateTime @default(now())
 
   @@index([faturaId])
 }

@@ -14,6 +14,14 @@ async function limparBanco() {
   await prisma.fatura.deleteMany();
   await prisma.contrato.deleteMany();
   await prisma.inquilino.deleteMany();
+  await prisma.imovel.deleteMany();
+  await prisma.fiador.deleteMany();
+}
+
+let contadorCpf = 0;
+function proximoCpfDeTeste(): string {
+  contadorCpf += 1;
+  return String(30000000000 + contadorCpf).padStart(11, "0");
 }
 
 beforeAll(limparBanco);
@@ -49,13 +57,16 @@ describe("segurança da API", () => {
   });
 
   it("rejeita método de pagamento fora da lista permitida", async () => {
-    const inquilino = await prisma.inquilino.create({ data: { nome: "Teste HTTP" } });
+    const inquilino = await prisma.inquilino.create({ data: { nome: "Teste HTTP", cpf: proximoCpfDeTeste() } });
+    const imovel = await prisma.imovel.create({ data: { endereco: "Apto HTTP", valorPadrao: 500 } });
     const contrato = await prisma.contrato.create({
       data: {
         inquilinoId: inquilino.id,
-        imovel: "Apto HTTP",
+        imovelId: imovel.id,
         valorAluguel: 500,
         diaVencimento: 5,
+        tipoGarantia: "CAUCAO",
+        valorCaucao: 1500,
         dataInicio: new Date("2026-01-01"),
         dataFim: new Date("2027-01-01"),
       },
@@ -79,13 +90,18 @@ describe("segurança da API", () => {
   });
 
   it("usa o header x-usuario autenticado como responsável pela auditoria, ignorando o corpo", async () => {
-    const inquilino = await prisma.inquilino.create({ data: { nome: "Teste Auditoria" } });
+    const inquilino = await prisma.inquilino.create({
+      data: { nome: "Teste Auditoria", cpf: proximoCpfDeTeste() },
+    });
+    const imovel = await prisma.imovel.create({ data: { endereco: "Apto Auditoria", valorPadrao: 300 } });
     const contrato = await prisma.contrato.create({
       data: {
         inquilinoId: inquilino.id,
-        imovel: "Apto Auditoria",
+        imovelId: imovel.id,
         valorAluguel: 300,
         diaVencimento: 5,
+        tipoGarantia: "CAUCAO",
+        valorCaucao: 900,
         dataInicio: new Date("2026-01-01"),
         dataFim: new Date("2027-01-01"),
       },

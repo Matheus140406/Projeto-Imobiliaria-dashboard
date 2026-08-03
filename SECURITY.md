@@ -1,7 +1,8 @@
-# Segurança — Módulo Financeiro
+# Segurança — Financeiro + Cadastros
 
 Medidas aplicadas para reduzir o impacto de um vazamento de código, roubo de
-credenciais ou acesso indevido ao servidor.
+credenciais ou acesso indevido ao servidor. Cobre tanto o módulo financeiro
+quanto os cadastros (inquilino, fiador, imóvel, contrato).
 
 ## Autenticação
 
@@ -44,6 +45,24 @@ credenciais ou acesso indevido ao servidor.
 - Validação de `valorPago` (finito, > 0) também existe dentro do
   `pagamentoService`, não só no zod da rota — protege chamadas diretas ao
   service (jobs, scripts, testes).
+- **CPF validado por dígito verificador** (`src/lib/cpf.ts`), não só por
+  formato — rejeita sequências como `111.111.111-11` que passam numa checagem
+  ingênua de tamanho. CPF duplicado retorna erro amigável (409), não o erro
+  bruto do banco.
+- **Garantia obrigatória em contrato**: caução ≥ 3x o aluguel OU fiador ativo
+  vinculado — validado no service, não confia em nada vindo do cliente além
+  dos valores numéricos.
+- **Fiador é verificado antes de vincular**: precisa existir, não estar
+  soft-deletado e estar `ativo`; senão o contrato não é criado.
+- **Imóvel não pode ser alugado duas vezes**: contrato só é criado se o
+  imóvel estiver `DISPONIVEL`; a criação do contrato e a mudança de status do
+  imóvel para `ALUGADO` ocorrem na mesma transação.
+- **Soft delete em Inquilino, Fiador, Imóvel e Contrato** (`deletedAt`):
+  excluir nunca apaga histórico de contratos/faturas/pagamentos; listagens
+  filtram `deletedAt: null` por padrão.
+- **Duração máxima de contrato (20 anos)**: evita que uma `dataFim` absurda
+  gere milhares de parcelas de uma vez (defesa em duas camadas — validação no
+  `contratoService` e uma trava dura de 600 meses em `gerarParcelasContrato`).
 
 ## Hardening HTTP
 

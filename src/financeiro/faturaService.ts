@@ -85,6 +85,33 @@ export async function gerarFaturasDoMes(prisma: PrismaClient, referencia: Date =
   return { faturas, erros };
 }
 
+/**
+ * Gera automaticamente 1 fatura por mês de vigência do contrato (de dataInicio até
+ * dataFim, inclusive), chamada uma vez na criação do contrato. Reaproveita
+ * gerarFaturaMensal para cada competência, então é seguro chamar de novo (idempotente)
+ * e convive bem com o cron mensal, que só cria a fatura do mês corrente se ela ainda
+ * não existir.
+ */
+export async function gerarParcelasContrato(prisma: PrismaClient, contratoId: string) {
+  const contrato = await prisma.contrato.findUniqueOrThrow({ where: { id: contratoId } });
+
+  const referencia = new Date(contrato.dataInicio.getFullYear(), contrato.dataInicio.getMonth(), 1);
+  const fim = new Date(contrato.dataFim.getFullYear(), contrato.dataFim.getMonth(), 1);
+
+  // Trava de segurança: um contrato com dataFim absurdamente distante não deve gerar
+  // milhares de faturas de uma vez (a validação de duração fica em contratoService,
+  // isto aqui é a segunda camada de defesa).
+  const LIMITE_MESES = 600; // 50 anos
+  const faturas = [];
+  let meses = 0;
+  while (referencia <= fim && meses < LIMITE_MESES) {
+    faturas.push(await gerarFaturaMensal(prisma, contratoId, new Date(referencia)));
+    referencia.setMonth(referencia.getMonth() + 1);
+    meses++;
+  }
+  return faturas;
+}
+
 // Regra de negócio: "vencimento + 1 dia < hoje". Vencimento D vira D+1 no dia seguinte
 // (ainda dentro da carência), e só passa a ser ATRASADO quando D+1 já ficou estritamente
 // no passado — ou seja, a partir de D+2. diasAtraso é a diferença em dias de calendário

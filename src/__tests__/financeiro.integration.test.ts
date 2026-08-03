@@ -12,16 +12,27 @@ async function limparBanco() {
   await prisma.fatura.deleteMany();
   await prisma.contrato.deleteMany();
   await prisma.inquilino.deleteMany();
+  await prisma.imovel.deleteMany();
+  await prisma.fiador.deleteMany();
+}
+
+let contadorCpf = 0;
+function proximoCpfDeTeste(): string {
+  contadorCpf += 1;
+  return String(10000000000 + contadorCpf).padStart(11, "0");
 }
 
 async function criarContrato(overrides: Partial<{ diaVencimento: number }> = {}) {
-  const inquilino = await prisma.inquilino.create({ data: { nome: "Maria Silva" } });
+  const inquilino = await prisma.inquilino.create({ data: { nome: "Maria Silva", cpf: proximoCpfDeTeste() } });
+  const imovel = await prisma.imovel.create({ data: { endereco: "Apto 101", valorPadrao: 1000 } });
   return prisma.contrato.create({
     data: {
       inquilinoId: inquilino.id,
-      imovel: "Apto 101",
+      imovelId: imovel.id,
       valorAluguel: 1000,
       diaVencimento: overrides.diaVencimento ?? 5,
+      tipoGarantia: "CAUCAO",
+      valorCaucao: 3000,
       dataInicio: new Date("2026-01-01"),
       dataFim: new Date("2027-01-01"),
     },
@@ -170,13 +181,18 @@ describe("fluxo de fatura e pagamento", () => {
 
   it("isola falha de um contrato ao gerar faturas do mês, sem derrubar os demais", async () => {
     const contratoValido = await criarContrato({ diaVencimento: 5 });
-    const inquilinoProblema = await prisma.inquilino.create({ data: { nome: "Contrato Problemático" } });
+    const inquilinoProblema = await prisma.inquilino.create({
+      data: { nome: "Contrato Problemático", cpf: proximoCpfDeTeste() },
+    });
+    const imovelProblema = await prisma.imovel.create({ data: { endereco: "Apto 202", valorPadrao: 800 } });
     const contratoProblema = await prisma.contrato.create({
       data: {
         inquilinoId: inquilinoProblema.id,
-        imovel: "Apto 202",
+        imovelId: imovelProblema.id,
         valorAluguel: 800,
         diaVencimento: 10,
+        tipoGarantia: "CAUCAO",
+        valorCaucao: 2400,
         dataInicio: new Date("2026-01-01"),
         dataFim: new Date("2027-01-01"),
         status: "ATIVO",
