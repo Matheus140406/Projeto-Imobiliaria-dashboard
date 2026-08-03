@@ -16,6 +16,13 @@ e a API mesclada sob o mesmo servidor.
 Node.js + TypeScript + Express 5 + Prisma (SQLite em dev) + Zod + Vitest + PDFKit +
 JWT (`jsonwebtoken` + `bcryptjs`) + Nodemailer.
 
+## Frontend
+
+Interface web em `frontend/` (React + TypeScript + Vite), com o layout
+portado de um protótipo feito no Figma Make e conectado às rotas reais desta
+API (Dashboard, Financeiro, Contratos, Imóveis, Cadastros). Ver
+`frontend/README.md` para rodar localmente.
+
 ## Módulos
 
 ### Cadastros (Edu)
