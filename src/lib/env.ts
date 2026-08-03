@@ -5,6 +5,9 @@ const envSchema = z.object({
   API_KEY: z
     .string()
     .min(32, "API_KEY deve ter pelo menos 32 caracteres (use: openssl rand -hex 32)"),
+  JWT_SECRET: z
+    .string()
+    .min(32, "JWT_SECRET deve ter pelo menos 32 caracteres (use: openssl rand -hex 32)"),
   PORT: z.coerce.number().int().positive().default(3000),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 });

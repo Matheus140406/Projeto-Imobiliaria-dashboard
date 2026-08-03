@@ -12,6 +12,7 @@ async function limparBanco() {
   await prisma.auditoriaPagamento.deleteMany();
   await prisma.pagamento.deleteMany();
   await prisma.fatura.deleteMany();
+  await prisma.contrato.updateMany({ data: { renovadoDeId: null } });
   await prisma.contrato.deleteMany();
   await prisma.inquilino.deleteMany();
   await prisma.imovel.deleteMany();

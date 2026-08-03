@@ -10,6 +10,7 @@ async function limparBanco() {
   await prisma.auditoriaPagamento.deleteMany();
   await prisma.pagamento.deleteMany();
   await prisma.fatura.deleteMany();
+  await prisma.contrato.updateMany({ data: { renovadoDeId: null } });
   await prisma.contrato.deleteMany();
   await prisma.inquilino.deleteMany();
   await prisma.imovel.deleteMany();
@@ -163,7 +164,7 @@ describe("fluxo de fatura e pagamento", () => {
     expect(faturaInalterada.status).toBe("PENDENTE");
   });
 
-  it("aceita pagamento com diferença de centavos por arredondamento", async () => {
+  it("aceita pagamento com 1 centavo a menos (tolerância de arredondamento)", async () => {
     const contrato = await criarContrato({ diaVencimento: 5 });
     const fatura = await gerarFaturaMensal(prisma, contrato.id, new Date("2026-07-01"));
     await marcarFaturasAtrasadas(prisma, new Date("2026-07-10"));
@@ -171,7 +172,7 @@ describe("fluxo de fatura e pagamento", () => {
 
     const { fatura: faturaPaga } = await registrarPagamento(prisma, {
       faturaId: fatura.id,
-      valorPago: faturaAtrasada.valorTotal - 0.005,
+      valorPago: faturaAtrasada.valorTotal - 1,
       metodo: "PIX",
       registradoPor: "matheus",
     });

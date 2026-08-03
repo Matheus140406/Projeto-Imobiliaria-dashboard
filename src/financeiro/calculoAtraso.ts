@@ -1,6 +1,8 @@
 /**
  * Calcula multa (percentual fixo contratual) + juros (taxa diária sobre o valor original)
  * para uma fatura em atraso. Juros incidem por dia corrido após o vencimento.
+ *
+ * Todo valor monetário aqui é em CENTAVOS (inteiro) — ver src/lib/dinheiro.ts.
  */
 export interface CalculoAtrasoInput {
   valorOriginal: number;
@@ -17,8 +19,10 @@ export interface CalculoAtrasoResultado {
   valorTotal: number;
 }
 
+// Já estamos em centavos (inteiro); só falta arredondar a fração de centavo que
+// multa % e juros % podem gerar.
 function arredonda(valor: number): number {
-  return Math.round(valor * 100) / 100;
+  return Math.round(valor);
 }
 
 export function diasEntre(inicio: Date, fim: Date): number {

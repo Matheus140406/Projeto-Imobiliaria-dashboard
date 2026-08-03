@@ -40,7 +40,7 @@ const limitadorPagamentos = rateLimit({
   legacyHeaders: false,
 });
 
-app.use("/api", limitadorGlobal, autenticar(env.API_KEY));
+app.use("/api", limitadorGlobal, autenticar(env.API_KEY, env.JWT_SECRET));
 app.use("/api/faturas/:faturaId/pagamentos", limitadorPagamentos);
 app.use("/api", router);
 

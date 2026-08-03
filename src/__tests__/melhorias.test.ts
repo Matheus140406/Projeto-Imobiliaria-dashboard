@@ -19,6 +19,9 @@ async function limparBanco() {
   await prisma.auditoriaPagamento.deleteMany();
   await prisma.pagamento.deleteMany();
   await prisma.fatura.deleteMany();
+  await prisma.aditivo.deleteMany();
+  // Zera a auto-referência (renovação) antes de apagar, senão o FK impede o delete.
+  await prisma.contrato.updateMany({ data: { renovadoDeId: null } });
   await prisma.contrato.deleteMany();
   await prisma.inquilino.deleteMany();
   await prisma.imovel.deleteMany();
@@ -341,5 +344,120 @@ describe("detalheFatura mostra o cálculo transparente mesmo sem o cron ter roda
     const detalhe = await detalheFatura(prisma, fatura.id);
     expect(detalhe.calculoAtual.diasAtraso).toBeGreaterThan(0);
     expect(detalhe.calculoAtual.valorTotal).toBeGreaterThan(fatura.valorTotal);
+  });
+});
+
+describe("aditivo contratual: altera valor/vencimento futuros sem tocar no passado", () => {
+  it("regenera apenas as faturas PENDENTES a partir da data de vigência, com o novo valor", async () => {
+    const inquilino = await criarInquilino(prisma, { nome: "Inquilino Aditivo", cpf: CPF_1 });
+    const imovel = await criarImovel(prisma, { endereco: "Rua Aditivo, 1", valorPadrao: 1000 });
+    const contrato = await criarContrato(prisma, {
+      inquilinoId: inquilino.id,
+      imovelId: imovel.id,
+      valorAluguel: 1000,
+      diaVencimento: 5,
+      tipoGarantia: "CAUCAO",
+      valorCaucao: 3000,
+      dataInicio: new Date("2026-08-01"),
+      dataFim: new Date("2026-12-01"),
+    });
+
+    const parcelasAntes = await historicoParcelas(prisma, contrato.id);
+    expect(parcelasAntes.every((p) => p.valorOriginal === 1000)).toBe(true);
+
+    const { registrarAditivo } = await import("../cadastros/aditivoService");
+    const resultado = await registrarAditivo(
+      prisma,
+      contrato.id,
+      { dataVigencia: new Date("2026-10-01"), novoValorAluguel: 1200 },
+      "usuario-teste"
+    );
+
+    expect(resultado.contratoAtualizado.valorAluguel).toBe(1200);
+
+    const parcelasDepois = await historicoParcelas(prisma, contrato.id);
+    const ago = parcelasDepois.find((p) => p.competencia === "2026-08");
+    const out = parcelasDepois.find((p) => p.competencia === "2026-10");
+    expect(ago?.valorOriginal).toBe(1000);
+    expect(out?.valorOriginal).toBe(1200);
+  });
+
+  it("rejeita aditivo com dataVigencia retroativa", async () => {
+    const inquilino = await criarInquilino(prisma, { nome: "Inquilino Aditivo 2", cpf: CPF_2 });
+    const imovel = await criarImovel(prisma, { endereco: "Rua Aditivo, 2", valorPadrao: 1000 });
+    const contrato = await criarContrato(prisma, {
+      inquilinoId: inquilino.id,
+      imovelId: imovel.id,
+      valorAluguel: 1000,
+      diaVencimento: 5,
+      tipoGarantia: "CAUCAO",
+      valorCaucao: 3000,
+      dataInicio: new Date("2026-01-01"),
+      dataFim: new Date("2026-05-01"),
+    });
+
+    const { registrarAditivo } = await import("../cadastros/aditivoService");
+    await expect(
+      registrarAditivo(prisma, contrato.id, { dataVigencia: new Date("2020-01-01"), novoValorAluguel: 1200 })
+    ).rejects.toThrow(/retroativa/);
+  });
+});
+
+describe("renovação de contrato: continuidade sem liberar o imóvel", () => {
+  it("encerra o contrato atual e cria um novo vinculado, mantendo o imóvel ALUGADO", async () => {
+    const inquilino = await criarInquilino(prisma, { nome: "Inquilino Renovacao", cpf: CPF_3 });
+    const imovel = await criarImovel(prisma, { endereco: "Rua Renovacao, 1", valorPadrao: 1000 });
+    const contrato = await criarContrato(prisma, {
+      inquilinoId: inquilino.id,
+      imovelId: imovel.id,
+      valorAluguel: 1000,
+      diaVencimento: 5,
+      tipoGarantia: "CAUCAO",
+      valorCaucao: 3000,
+      dataInicio: new Date("2026-01-01"),
+      dataFim: new Date("2026-04-01"),
+    });
+
+    const { renovarContrato } = await import("../cadastros/contratoService");
+    const novoContrato = await renovarContrato(
+      prisma,
+      contrato.id,
+      { novaDataFim: new Date("2026-08-01"), novoValorAluguel: 1100 },
+      "usuario-teste"
+    );
+
+    expect(novoContrato.renovadoDeId).toBe(contrato.id);
+    expect(novoContrato.valorAluguel).toBe(1100);
+    expect(novoContrato.dataInicio.toISOString().slice(0, 10)).toBe("2026-04-02");
+
+    const contratoAntigo = await prisma.contrato.findUniqueOrThrow({ where: { id: contrato.id } });
+    expect(contratoAntigo.status).toBe("ENCERRADO");
+
+    const imovelAtual = await prisma.imovel.findUniqueOrThrow({ where: { id: imovel.id } });
+    expect(imovelAtual.status).toBe("ALUGADO");
+
+    const parcelasNovoContrato = await historicoParcelas(prisma, novoContrato.id);
+    expect(parcelasNovoContrato.length).toBeGreaterThan(0);
+    expect(parcelasNovoContrato.every((p) => p.valorOriginal === 1100)).toBe(true);
+  });
+
+  it("rejeita renovação com nova data de fim anterior ou igual à atual", async () => {
+    const inquilino = await criarInquilino(prisma, { nome: "Inquilino Renovacao 2", cpf: CPF_1 });
+    const imovel = await criarImovel(prisma, { endereco: "Rua Renovacao, 2", valorPadrao: 1000 });
+    const contrato = await criarContrato(prisma, {
+      inquilinoId: inquilino.id,
+      imovelId: imovel.id,
+      valorAluguel: 1000,
+      diaVencimento: 5,
+      tipoGarantia: "CAUCAO",
+      valorCaucao: 3000,
+      dataInicio: new Date("2026-01-01"),
+      dataFim: new Date("2026-04-01"),
+    });
+
+    const { renovarContrato } = await import("../cadastros/contratoService");
+    await expect(
+      renovarContrato(prisma, contrato.id, { novaDataFim: new Date("2026-04-01") })
+    ).rejects.toThrow();
   });
 });

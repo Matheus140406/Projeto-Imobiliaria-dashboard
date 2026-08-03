@@ -6,6 +6,7 @@ import { buscarInquilino } from "./inquilinoService";
 import { buscarFiadorAtivo } from "./fiadorService";
 import { gerarParcelasContrato } from "../financeiro/faturaService";
 import { registrarLog } from "../lib/log";
+import { formatarReais } from "../lib/dinheiro";
 
 const ENTIDADE = "Contrato";
 
@@ -38,7 +39,7 @@ async function validarGarantia(prisma: PrismaClient, dados: CriarContratoInput) 
     if (!dados.valorCaucao || dados.valorCaucao < minimo) {
       throw new AppError(
         422,
-        `Caução deve ser de no mínimo 3x o valor do aluguel (mínimo: ${minimo.toFixed(2)})`
+        `Caução deve ser de no mínimo 3x o valor do aluguel (mínimo: ${formatarReais(minimo)})`
       );
     }
     return { fiadorId: undefined };
@@ -186,4 +187,75 @@ export async function encerrarContrato(prisma: PrismaClient, id: string, usuario
 
   await registrarLog(prisma, { entidade: ENTIDADE, entidadeId: id, acao: "ENCERRADO", usuario });
   return atualizado;
+}
+
+export interface RenovarContratoInput {
+  novaDataFim: Date;
+  novoValorAluguel?: number;
+}
+
+/**
+ * Renova o contrato: encerra o atual (soft delete, sem liberar o imóvel — ele
+ * continua ocupado pelo mesmo inquilino) e cria um novo contrato equivalente
+ * (mesmo inquilino/imóvel/fiador/garantia), começando no dia seguinte ao término
+ * do anterior e indo até `novaDataFim`, com as parcelas já geradas. Diferente de
+ * `criarContrato`, não passa pelas checagens de imóvel disponível/sobreposição,
+ * porque o imóvel já está legitimamente ocupado pelo contrato sendo renovado.
+ */
+export async function renovarContrato(
+  prisma: PrismaClient,
+  contratoId: string,
+  dados: RenovarContratoInput,
+  usuario = "desconhecido"
+) {
+  const contratoAtual = await buscarContrato(prisma, contratoId);
+  if (contratoAtual.status !== StatusContrato.ATIVO) {
+    throw new AppError(409, "Só é possível renovar um contrato ativo");
+  }
+  if (dados.novaDataFim <= contratoAtual.dataFim) {
+    throw new AppError(422, "novaDataFim deve ser posterior à dataFim do contrato atual");
+  }
+
+  const novaDataInicio = new Date(contratoAtual.dataFim);
+  novaDataInicio.setDate(novaDataInicio.getDate() + 1);
+  validarDatas(novaDataInicio, dados.novaDataFim);
+
+  const novoContrato = await prisma.$transaction(async (tx) => {
+    await tx.contrato.update({
+      where: { id: contratoId },
+      data: { status: StatusContrato.ENCERRADO, deletedAt: new Date() },
+    });
+
+    return tx.contrato.create({
+      data: {
+        inquilinoId: contratoAtual.inquilinoId,
+        imovelId: contratoAtual.imovelId,
+        fiadorId: contratoAtual.fiadorId,
+        valorAluguel: dados.novoValorAluguel ?? contratoAtual.valorAluguel,
+        diaVencimento: contratoAtual.diaVencimento,
+        tipoGarantia: contratoAtual.tipoGarantia,
+        valorCaucao: contratoAtual.valorCaucao,
+        responsavelIptu: contratoAtual.responsavelIptu,
+        percentualMulta: contratoAtual.percentualMulta,
+        taxaJurosDiaria: contratoAtual.taxaJurosDiaria,
+        dataInicio: novaDataInicio,
+        dataFim: dados.novaDataFim,
+        status: StatusContrato.ATIVO,
+        renovadoDeId: contratoAtual.id,
+      },
+    });
+    // Note: imóvel permanece ALUGADO — não há update de status aqui de propósito.
+  });
+
+  await gerarParcelasContrato(prisma, novoContrato.id);
+  await registrarLog(prisma, { entidade: ENTIDADE, entidadeId: contratoId, acao: "RENOVADO", usuario, detalhes: { novoContratoId: novoContrato.id } });
+  await registrarLog(prisma, {
+    entidade: ENTIDADE,
+    entidadeId: novoContrato.id,
+    acao: "CRIADO_POR_RENOVACAO",
+    usuario,
+    detalhes: { contratoAnteriorId: contratoId },
+  });
+
+  return novoContrato;
 }

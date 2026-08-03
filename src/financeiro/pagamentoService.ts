@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { StatusFatura } from "../lib/status";
 import { AppError } from "../lib/errors";
+import { formatarReais } from "../lib/dinheiro";
 
 export interface RegistrarPagamentoInput {
   faturaId: string;
@@ -14,9 +15,10 @@ export interface RegistrarPagamentoInput {
 const PONTOS_PAGAMENTO_EM_DIA = 5;
 const PONTOS_PAGAMENTO_ATRASADO = -10;
 
-// Diferença máxima aceitável entre valor pago e valor total, para absorver
-// arredondamento de ponto flutuante (valores monetários armazenados como Float).
-const TOLERANCIA_CENTAVOS = 0.01;
+// Valores monetários são inteiros em centavos (ver src/lib/dinheiro.ts), então não há
+// mais arredondamento de ponto flutuante a absorver — a tolerância existe só para
+// eventuais chamadores que ainda repassem uma fração de centavo por engano.
+const TOLERANCIA_CENTAVOS = 1;
 
 /**
  * Registra o pagamento manual de uma fatura, grava auditoria e ajusta o
@@ -44,7 +46,7 @@ export async function registrarPagamento(prisma: PrismaClient, input: RegistrarP
     if (input.valorPago < fatura.valorTotal - TOLERANCIA_CENTAVOS) {
       throw new AppError(
         422,
-        `Valor pago (${input.valorPago.toFixed(2)}) é menor que o valor total da fatura (${fatura.valorTotal.toFixed(2)}). Pagamentos parciais não são suportados.`
+        `Valor pago (${formatarReais(input.valorPago)}) é menor que o valor total da fatura (${formatarReais(fatura.valorTotal)}). Pagamentos parciais não são suportados.`
       );
     }
 

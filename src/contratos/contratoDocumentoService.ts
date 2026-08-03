@@ -1,5 +1,6 @@
 import PDFDocument from "pdfkit";
 import { AppError } from "../lib/errors";
+import { formatarReais } from "../lib/dinheiro";
 
 interface InquilinoDoc {
   nome: string;
@@ -19,6 +20,8 @@ interface ImovelDoc {
   valorIptuMensal: number | null;
 }
 
+// Campos monetários em CENTAVOS (ver src/lib/dinheiro.ts) — vêm direto do Prisma,
+// sem conversão prévia, porque este service formata para exibição (texto/PDF).
 export interface ContratoDoc {
   id: string;
   valorAluguel: number;
@@ -39,9 +42,8 @@ function formataData(data: Date): string {
   return data.toLocaleDateString("pt-BR", { timeZone: "UTC" });
 }
 
-function formataMoeda(valor: number): string {
-  return valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
+// contrato.valorAluguel etc. chegam em centavos (ver src/lib/dinheiro.ts).
+const formataMoeda = formatarReais;
 
 /**
  * Avisos/dicas sobre o que falta ou é recomendado preencher antes de fechar o
