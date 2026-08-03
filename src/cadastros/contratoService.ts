@@ -1,10 +1,13 @@
 import { PrismaClient } from "@prisma/client";
 import { AppError } from "../lib/errors";
-import { StatusContrato, StatusImovel, TipoGarantia } from "../lib/status";
+import { ResponsavelIptu, StatusContrato, StatusImovel, TipoGarantia } from "../lib/status";
 import { buscarImovelDisponivel } from "./imovelService";
 import { buscarInquilino } from "./inquilinoService";
 import { buscarFiadorAtivo } from "./fiadorService";
 import { gerarParcelasContrato } from "../financeiro/faturaService";
+import { registrarLog } from "../lib/log";
+
+const ENTIDADE = "Contrato";
 
 // Duração máxima de um contrato, para não permitir datas absurdas que gerariam
 // milhares de parcelas (defesa em profundidade, ver LIMITE_MESES em faturaService).
@@ -22,6 +25,7 @@ export interface CriarContratoInput {
   dataFim: Date;
   percentualMulta?: number;
   taxaJurosDiaria?: number;
+  responsavelIptu?: "INQUILINO" | "PROPRIETARIO";
 }
 
 /**
@@ -63,14 +67,46 @@ function validarDatas(dataInicio: Date, dataFim: Date) {
 }
 
 /**
- * Cria o contrato, valida garantia e disponibilidade, marca o imóvel como ALUGADO e já
- * gera as parcelas (faturas) de toda a vigência — tudo dentro de uma única transação
- * para não deixar o imóvel "preso" como alugado se a geração de parcelas falhar.
+ * Defesa em profundidade além do status DISPONIVEL do imóvel: garante que não existe
+ * outro contrato ativo (não encerrado) para o mesmo imóvel cujo período se sobreponha
+ * ao novo. O status é a checagem "rápida" para o caso comum; isto cobre o caso de um
+ * status desatualizado ou de uma corrida entre duas criações simultâneas.
  */
-export async function criarContrato(prisma: PrismaClient, dados: CriarContratoInput) {
+async function validarSemSobreposicao(
+  prisma: PrismaClient,
+  imovelId: string,
+  dataInicio: Date,
+  dataFim: Date
+) {
+  const conflito = await prisma.contrato.findFirst({
+    where: {
+      imovelId,
+      deletedAt: null,
+      status: StatusContrato.ATIVO,
+      dataInicio: { lte: dataFim },
+      dataFim: { gte: dataInicio },
+    },
+  });
+  if (conflito) {
+    throw new AppError(409, "Já existe um contrato ativo para este imóvel no período informado");
+  }
+}
+
+/**
+ * Cria o contrato, valida garantia e disponibilidade, marca o imóvel como ALUGADO e já
+ * gera as parcelas (faturas, incluindo IPTU se aplicável) de toda a vigência — tudo
+ * dentro de uma única transação para não deixar o imóvel "preso" como alugado se a
+ * geração de parcelas falhar.
+ */
+export async function criarContrato(
+  prisma: PrismaClient,
+  dados: CriarContratoInput,
+  usuario = "desconhecido"
+) {
   validarDatas(dados.dataInicio, dados.dataFim);
   await buscarInquilino(prisma, dados.inquilinoId);
   await buscarImovelDisponivel(prisma, dados.imovelId);
+  await validarSemSobreposicao(prisma, dados.imovelId, dados.dataInicio, dados.dataFim);
   const { fiadorId } = await validarGarantia(prisma, dados);
 
   const contrato = await prisma.$transaction(async (tx) => {
@@ -83,6 +119,7 @@ export async function criarContrato(prisma: PrismaClient, dados: CriarContratoIn
         diaVencimento: dados.diaVencimento,
         tipoGarantia: dados.tipoGarantia,
         valorCaucao: dados.valorCaucao,
+        responsavelIptu: dados.responsavelIptu ?? ResponsavelIptu.INQUILINO,
         dataInicio: dados.dataInicio,
         dataFim: dados.dataFim,
         percentualMulta: dados.percentualMulta,
@@ -97,6 +134,13 @@ export async function criarContrato(prisma: PrismaClient, dados: CriarContratoIn
   });
 
   await gerarParcelasContrato(prisma, contrato.id);
+  await registrarLog(prisma, {
+    entidade: ENTIDADE,
+    entidadeId: contrato.id,
+    acao: "CRIADO",
+    usuario,
+    detalhes: { imovelId: dados.imovelId, inquilinoId: dados.inquilinoId, tipoGarantia: dados.tipoGarantia },
+  });
   return contrato;
 }
 
@@ -128,15 +172,18 @@ export async function historicoParcelas(prisma: PrismaClient, contratoId: string
 }
 
 /** Encerra o contrato (soft delete) e libera o imóvel para nova locação. */
-export async function encerrarContrato(prisma: PrismaClient, id: string) {
+export async function encerrarContrato(prisma: PrismaClient, id: string, usuario = "desconhecido") {
   const contrato = await buscarContrato(prisma, id);
 
-  return prisma.$transaction(async (tx) => {
-    const atualizado = await tx.contrato.update({
+  const atualizado = await prisma.$transaction(async (tx) => {
+    const contratoAtualizado = await tx.contrato.update({
       where: { id },
       data: { status: StatusContrato.ENCERRADO, deletedAt: new Date() },
     });
     await tx.imovel.update({ where: { id: contrato.imovelId }, data: { status: StatusImovel.DISPONIVEL } });
-    return atualizado;
+    return contratoAtualizado;
   });
+
+  await registrarLog(prisma, { entidade: ENTIDADE, entidadeId: id, acao: "ENCERRADO", usuario });
+  return atualizado;
 }

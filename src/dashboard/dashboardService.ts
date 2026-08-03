@@ -50,14 +50,40 @@ export async function inadimplencia(prisma: PrismaClient, filtro: FiltroDashboar
   return { total, quantidade: faturas.length, faturas };
 }
 
-/** Faturas pendentes ainda não vencidas (a receber). */
-export async function aReceber(prisma: PrismaClient, filtro: FiltroDashboard = {}) {
+/**
+ * Faturas pendentes ainda não vencidas (a receber). Se `proximosDias` for informado,
+ * restringe às que vencem entre hoje e hoje + N dias (ex.: "a receber nos próximos 7 dias").
+ */
+export async function aReceber(prisma: PrismaClient, filtro: FiltroDashboard = {}, proximosDias?: number) {
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const janela =
+    proximosDias != null
+      ? { dataVencimento: { gte: hoje, lte: new Date(hoje.getTime() + proximosDias * 86400000) } }
+      : {};
+
   const resultado = await prisma.fatura.aggregate({
-    where: { ...aplicarFiltros(filtro), status: StatusFatura.PENDENTE },
+    where: { ...aplicarFiltros(filtro), ...janela, status: StatusFatura.PENDENTE },
     _sum: { valorTotal: true },
     _count: true,
   });
   return { total: resultado._sum.valorTotal ?? 0, quantidade: resultado._count };
+}
+
+/**
+ * Listagem geral de faturas para a tela financeira, com filtros comuns: status,
+ * competência e imóvel/inquilino. Traz inquilino/imóvel juntos para montar a tabela
+ * (Inquilino, Imóvel, Vencimento, Status, Valor Original, Valor com Multa) sem N+1.
+ */
+export async function listarFaturas(
+  prisma: PrismaClient,
+  filtro: FiltroDashboard & { status?: string } = {}
+) {
+  return prisma.fatura.findMany({
+    where: { ...aplicarFiltros(filtro), ...(filtro.status ? { status: filtro.status } : {}) },
+    include: { contrato: { include: { inquilino: true, imovel: true } } },
+    orderBy: { dataVencimento: "asc" },
+  });
 }
 
 /** Contratos ativos cujo término está dentro dos próximos `diasLimite` dias. */

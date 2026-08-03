@@ -63,6 +63,18 @@ quanto os cadastros (inquilino, fiador, imóvel, contrato).
 - **Duração máxima de contrato (20 anos)**: evita que uma `dataFim` absurda
   gere milhares de parcelas de uma vez (defesa em duas camadas — validação no
   `contratoService` e uma trava dura de 600 meses em `gerarParcelasContrato`).
+- **Sobreposição de datas no mesmo imóvel**: além do status `DISPONIVEL`,
+  o `contratoService` verifica explicitamente que não existe outro contrato
+  ativo do mesmo imóvel com período conflitante — defesa em profundidade
+  contra status desatualizado ou corrida entre duas criações simultâneas.
+- **Status de imóvel `ALUGADO` não é editável manualmente**: só o ciclo de
+  vida do contrato (criar/encerrar) muda para `ALUGADO`/`DISPONIVEL`; a rota
+  de edição bloqueia tentativa de setar status num imóvel já alugado.
+- **Log de atividade não derruba a operação principal**: se gravar o log
+  falhar por qualquer motivo, o erro é só logado no console — nunca impede
+  a criação/edição/exclusão do cadastro em si.
+- **Geração de PDF isolada em try/catch dedicado**: erros do PDFKit viram
+  erro genérico tratado pelo handler central, nunca stack trace exposta.
 
 ## Hardening HTTP
 
@@ -88,11 +100,8 @@ quanto os cadastros (inquilino, fiador, imóvel, contrato).
   centavo nas comparações, mas migrar para inteiro em centavos é mais robusto
   a longo prazo.
 - Não há autenticação por usuário/papel (RBAC) — a API key é única e dá
-  acesso total. Adequado para serviço-a-serviço, não para múltiplos
-  operadores até o sistema de usuários existir.
+  acesso total. Decisão consciente: por ora só uma pessoa opera o sistema,
+  então RBAC fica para quando houver múltiplos operadores.
 - SQLite em dev não tem criptografia em repouso; em produção, usar Postgres
-  com disco criptografado.
-- `ts-node-dev` (dependência de desenvolvimento) traz uma vulnerabilidade
-  transitiva conhecida em `brace-expansion`/`glob`/`rimraf` sem correção
-  disponível upstream; não afeta o build de produção (`npm run build && npm
-  start` não usa `ts-node-dev`).
+  com disco criptografado (fora do escopo atual — ambiente é só local/dev).
+- `npm audit` está limpo (0 vulnerabilidades) na última checagem.

@@ -39,14 +39,18 @@ model Fiador {
 }
 
 model Imovel {
-  id          String     @id @default(cuid())
-  endereco    String
-  valorPadrao Float
-  status      String     @default("DISPONIVEL")
-  contratos   Contrato[]
-  createdAt   DateTime   @default(now())
-  updatedAt   DateTime   @updatedAt
-  deletedAt   DateTime?
+  id              String     @id @default(cuid())
+  endereco        String
+  valorPadrao     Float
+  // Valor mensal do IPTU do imóvel (opcional). Se preenchido e o contrato
+  // atribuir a responsabilidade ao inquilino, faturas de IPTU são geradas
+  // junto com as de aluguel (ver Contrato.responsavelIptu).
+  valorIptuMensal Float?
+  status          String     @default("DISPONIVEL")
+  contratos       Contrato[]
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  deletedAt       DateTime?
 
   @@index([status])
   @@index([deletedAt])
@@ -66,6 +70,10 @@ model Contrato {
   taxaJurosDiaria Float      @default(0.033)
   tipoGarantia    String
   valorCaucao     Float?
+  // Quem paga o IPTU do imóvel durante a vigência: "INQUILINO" ou "PROPRIETARIO".
+  // Só gera fatura de IPTU (ver Fatura.tipo) quando for INQUILINO e o imóvel
+  // tiver valorIptuMensal preenchido.
+  responsavelIptu String     @default("INQUILINO")
   dataInicio      DateTime
   dataFim         DateTime
   status          String     @default("ATIVO")
@@ -86,6 +94,9 @@ model Fatura {
   contrato       Contrato    @relation(fields: [contratoId], references: [id])
   contratoId     String
   competencia    String
+  // "ALUGUEL" (padrão) ou "IPTU" — faturas de IPTU usam o mesmo motor de
+  // geração/atraso/pagamento, só o valor de origem e o rótulo mudam.
+  tipo           String      @default("ALUGUEL")
   valorOriginal  Float
   valorMulta     Float       @default(0)
   valorJuros     Float       @default(0)
@@ -96,9 +107,10 @@ model Fatura {
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
-  @@unique([contratoId, competencia])
+  @@unique([contratoId, competencia, tipo])
   @@index([status])
   @@index([dataVencimento])
+  @@index([tipo])
 }
 
 model Pagamento {
@@ -124,4 +136,20 @@ model AuditoriaPagamento {
   createdAt DateTime @default(now())
 
   @@index([faturaId])
+}
+
+// Log genérico de atividade: quem fez o quê e quando, em qualquer cadastro
+// (inquilino, fiador, imóvel, contrato). Complementa AuditoriaPagamento, que
+// é específica de pagamentos.
+model LogAtividade {
+  id         String   @id @default(cuid())
+  entidade   String
+  entidadeId String
+  acao       String
+  usuario    String
+  detalhes   String?
+  createdAt  DateTime @default(now())
+
+  @@index([entidade, entidadeId])
+  @@index([createdAt])
 }

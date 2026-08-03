@@ -25,3 +25,15 @@ export const TipoGarantia = {
   FIADOR: "FIADOR",
 } as const;
 export type TipoGarantia = (typeof TipoGarantia)[keyof typeof TipoGarantia];
+
+export const TipoFatura = {
+  ALUGUEL: "ALUGUEL",
+  IPTU: "IPTU",
+} as const;
+export type TipoFatura = (typeof TipoFatura)[keyof typeof TipoFatura];
+
+export const ResponsavelIptu = {
+  INQUILINO: "INQUILINO",
+  PROPRIETARIO: "PROPRIETARIO",
+} as const;
+export type ResponsavelIptu = (typeof ResponsavelIptu)[keyof typeof ResponsavelIptu];
