@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: imobiliaria-api
+    runtime: node
+    plan: free
+    buildCommand: npm install && npx prisma generate && npx prisma migrate deploy && npm run build
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        value: file:./prod.db
+      - key: API_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: NODE_ENV
+        value: production
+      - key: CORS_ORIGIN
+        sync: false
+      - key: PORT
+        value: 3000
+    # Disco persistente (SQLite sobrevive a redeploys) exige plano Starter ($7/mês) ou acima.
+    # No plano free, o disco NÃO é o mesmo entre um redeploy e outro.
+    # Para usar: mude "plan" acima para "starter" e descomente o bloco abaixo.
+    # disk:
+    #   name: imobiliaria-db
+    #   mountPath: /opt/render/project/src/data
+    #   sizeGB: 1
