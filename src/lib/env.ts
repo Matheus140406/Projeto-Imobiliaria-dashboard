@@ -10,6 +10,9 @@ const envSchema = z.object({
     .min(32, "JWT_SECRET deve ter pelo menos 32 caracteres (use: openssl rand -hex 32)"),
   PORT: z.coerce.number().int().positive().default(3000),
   NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
+  // Só usado pelo endpoint /cron/marcar-atrasadas (chamado pelo Vercel Cron em produção
+  // serverless, que não roda node-cron in-process). Ausente = endpoint fica desabilitado.
+  CRON_SECRET: z.string().min(16).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
