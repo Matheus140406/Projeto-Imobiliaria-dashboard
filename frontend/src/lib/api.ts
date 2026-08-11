@@ -1,4 +1,10 @@
 const BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000/api";
+// A API Key é fixa, definida no .env de cada máquina/dev (nunca commitada) — o
+// usuário final só faz login com email/senha, sem precisar saber que ela existe.
+// Ela ainda é enviada em toda requisição (é exigida pelo backend), só não aparece
+// mais na tela; qualquer pessoa com acesso ao DevTools do navegador consegue lê-la
+// no bundle, então ela não é mais "secreta" nesse sentido — só não fica visível na UI.
+const BUILTIN_API_KEY = import.meta.env.VITE_API_KEY ?? "";
 
 export class ApiError extends Error {
   status: number;
@@ -9,25 +15,23 @@ export class ApiError extends Error {
 }
 
 function getApiKey(): string {
-  return localStorage.getItem("apiKey") ?? "";
+  return BUILTIN_API_KEY;
 }
 
 function getToken(): string | null {
   return localStorage.getItem("token");
 }
 
-export function setCredenciais(apiKey: string, token?: string | null) {
-  localStorage.setItem("apiKey", apiKey);
-  if (token) localStorage.setItem("token", token);
+export function setToken(token: string) {
+  localStorage.setItem("token", token);
 }
 
 export function limparCredenciais() {
-  localStorage.removeItem("apiKey");
   localStorage.removeItem("token");
 }
 
 export function estaAutenticado(): boolean {
-  return Boolean(getApiKey());
+  return Boolean(getToken());
 }
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
