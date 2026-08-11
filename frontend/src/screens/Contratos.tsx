@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, Plus } from "lucide-react";
+import { ArrowRight, Plus, Trash2 } from "lucide-react";
 import { api, ApiError } from "../lib/api";
 import type { Contrato, Fatura, Inquilino, Imovel } from "../lib/types";
 import { Btn, ErroBox, Field, Input, Modal, PageHeader, Select, Spinner, StatusBadge, brl, fmtDate } from "../components/ui";
@@ -72,7 +72,16 @@ export function Contratos() {
         </div>
       )}
 
-      {selecionado && <ContractDetailModal contratoId={selecionado.id} onClose={() => setSelecionado(null)} />}
+      {selecionado && (
+        <ContractDetailModal
+          contratoId={selecionado.id}
+          onClose={() => setSelecionado(null)}
+          onExcluido={() => {
+            setSelecionado(null);
+            carregar();
+          }}
+        />
+      )}
       {mostrarNovo && (
         <NewContractModal
           onClose={() => setMostrarNovo(false)}
@@ -86,10 +95,20 @@ export function Contratos() {
   );
 }
 
-function ContractDetailModal({ contratoId, onClose }: { contratoId: string; onClose: () => void }) {
+function ContractDetailModal({
+  contratoId,
+  onClose,
+  onExcluido,
+}: {
+  contratoId: string;
+  onClose: () => void;
+  onExcluido: () => void;
+}) {
   const [contrato, setContrato] = useState<Contrato | null>(null);
   const [parcelas, setParcelas] = useState<Fatura[]>([]);
   const [erro, setErro] = useState("");
+  const [confirmandoExclusao, setConfirmandoExclusao] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
 
   useEffect(() => {
     Promise.all([api.get<Contrato>(`/contratos/${contratoId}`), api.get<Fatura[]>(`/contratos/${contratoId}/parcelas`)])
@@ -100,10 +119,25 @@ function ContractDetailModal({ contratoId, onClose }: { contratoId: string; onCl
       .catch((e) => setErro(e instanceof ApiError ? e.message : "Falha ao carregar contrato"));
   }, [contratoId]);
 
+  async function excluir() {
+    setErro("");
+    setExcluindo(true);
+    try {
+      await api.delete(`/contratos/${contratoId}`);
+      onExcluido();
+    } catch (e) {
+      setErro(e instanceof ApiError ? e.message : "Falha ao excluir contrato");
+      setExcluindo(false);
+      setConfirmandoExclusao(false);
+    }
+  }
+
   if (!contrato) return <Modal onClose={onClose} title="Detalhes do Contrato">{erro ? <ErroBox mensagem={erro} /> : <Spinner />}</Modal>;
 
   return (
     <Modal onClose={onClose} title="Detalhes do Contrato" width={640}>
+      {erro && <ErroBox mensagem={erro} />}
+
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
         {[
           ["Inquilino", contrato.inquilino?.nome ?? "—"],
@@ -113,7 +147,7 @@ function ContractDetailModal({ contratoId, onClose }: { contratoId: string; onCl
           ["Valor do Aluguel", brl(contrato.valorAluguel)],
           ["Dia de Vencimento", `Dia ${contrato.diaVencimento}`],
           ["Multa Contratual", `${contrato.percentualMulta}%`],
-          ["Juros por Atraso", `${contrato.taxaJurosDiaria}% a.d.`],
+          ["Juros por Atraso", `${contrato.taxaJurosDiaria}% ao dia`],
         ].map(([l, v]) => (
           <div key={l} style={{ background: "var(--bg)", borderRadius: 9, padding: "10px 14px" }}>
             <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 2, fontWeight: 600 }}>{l}</div>
@@ -123,7 +157,7 @@ function ContractDetailModal({ contratoId, onClose }: { contratoId: string; onCl
       </div>
 
       <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Histórico de Parcelas</div>
-      <div style={{ border: "1.5px solid var(--border)", borderRadius: 10, overflow: "hidden" }}>
+      <div style={{ border: "1.5px solid var(--border)", borderRadius: 10, overflow: "hidden", marginBottom: 20 }}>
         {parcelas
           .slice()
           .sort((a, b) => b.dataVencimento.localeCompare(a.dataVencimento))
@@ -137,6 +171,27 @@ function ContractDetailModal({ contratoId, onClose }: { contratoId: string; onCl
           ))}
         {!parcelas.length && <div style={{ padding: 20, textAlign: "center", color: "var(--text-muted)", fontSize: 13 }}>Sem parcelas.</div>}
       </div>
+
+      {!confirmandoExclusao ? (
+        <Btn variant="danger" icon={<Trash2 size={14} />} onClick={() => setConfirmandoExclusao(true)}>
+          Excluir Contrato
+        </Btn>
+      ) : (
+        <div style={{ background: "var(--red-dim)", border: "1px solid rgba(211,21,34,0.3)", borderRadius: 10, padding: 14 }}>
+          <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--red)", fontWeight: 600 }}>
+            Tem certeza que deseja excluir este contrato? Parcelas ainda pendentes serão canceladas. Faturas já pagas
+            ou atrasadas continuam no histórico. Essa ação não pode ser desfeita pela interface.
+          </p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Btn variant="ghost" onClick={() => setConfirmandoExclusao(false)} disabled={excluindo}>
+              Cancelar
+            </Btn>
+            <Btn variant="danger" onClick={excluir} disabled={excluindo}>
+              {excluindo ? "Excluindo…" : "Confirmar exclusão"}
+            </Btn>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 }
@@ -147,6 +202,7 @@ function NewContractModal({ onClose, onCriado }: { onClose: () => void; onCriado
   const [form, setForm] = useState({
     inquilinoId: "", imovelId: "", valorAluguel: "", diaVencimento: "5",
     dataInicio: "", dataFim: "", tipoGarantia: "CAUCAO" as "CAUCAO" | "FIADOR", valorCaucao: "",
+    percentualMulta: "10", taxaJurosDiaria: "0.5",
   });
   const [erro, setErro] = useState("");
   const [salvando, setSalvando] = useState(false);
@@ -171,6 +227,8 @@ function NewContractModal({ onClose, onCriado }: { onClose: () => void; onCriado
         valorCaucao: form.tipoGarantia === "CAUCAO" ? Number(form.valorCaucao) : undefined,
         dataInicio: form.dataInicio,
         dataFim: form.dataFim,
+        percentualMulta: form.percentualMulta ? Number(form.percentualMulta) : undefined,
+        taxaJurosDiaria: form.taxaJurosDiaria ? Number(form.taxaJurosDiaria) : undefined,
       });
       onCriado();
     } catch (e) {
@@ -223,6 +281,14 @@ function NewContractModal({ onClose, onCriado }: { onClose: () => void; onCriado
             <Input type="number" value={form.valorCaucao} onChange={(e) => setForm((f) => ({ ...f, valorCaucao: e.target.value }))} />
           </Field>
         )}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <Field label="Multa por Atraso (%)">
+            <Input type="number" step="0.1" value={form.percentualMulta} onChange={(e) => setForm((f) => ({ ...f, percentualMulta: e.target.value }))} />
+          </Field>
+          <Field label="Juros por Dia de Atraso (%)">
+            <Input type="number" step="0.01" value={form.taxaJurosDiaria} onChange={(e) => setForm((f) => ({ ...f, taxaJurosDiaria: e.target.value }))} />
+          </Field>
+        </div>
       </div>
       <div style={{ marginTop: 20, display: "flex", justifyContent: "flex-end", gap: 8 }}>
         <Btn variant="ghost" onClick={onClose}>Cancelar</Btn>

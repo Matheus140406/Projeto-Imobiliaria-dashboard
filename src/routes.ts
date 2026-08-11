@@ -43,6 +43,7 @@ import {
   buscarContrato,
   criarContrato,
   encerrarContrato,
+  excluirContrato,
   historicoParcelas,
   listarContratos,
   renovarContrato,
@@ -278,6 +279,13 @@ router.get("/contratos/:id/parcelas", async (req, res) => {
 router.post("/contratos/:id/encerrar", exigirPapel("ADMIN"), async (req, res) => {
   const id = idSchema.parse(req.params.id);
   res.json(paraReaisNaResposta(await encerrarContrato(prisma, id, req.usuario)));
+});
+
+// Exclusão lógica do contrato (ex.: quebrado antes do prazo) — mesma política de
+// acesso das outras exclusões de cadastro: exige ADMIN autenticado via JWT.
+router.delete("/contratos/:id", exigirPapel("ADMIN"), async (req, res) => {
+  const id = idSchema.parse(req.params.id);
+  res.json(paraReaisNaResposta(await excluirContrato(prisma, id, req.usuario)));
 });
 
 const renovarContratoSchema = z.object({

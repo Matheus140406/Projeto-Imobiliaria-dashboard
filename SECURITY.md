@@ -59,9 +59,18 @@ quanto os cadastros (inquilino, fiador, imóvel, contrato).
   formato — rejeita sequências como `111.111.111-11` que passam numa checagem
   ingênua de tamanho. CPF duplicado retorna erro amigável (409), não o erro
   bruto do banco.
-- **Garantia obrigatória em contrato**: caução ≥ 3x o aluguel OU fiador ativo
+- **Garantia obrigatória em contrato**: caução (qualquer valor > 0 — decisão
+  comercial do usuário, sem piso automático de "3x o aluguel") OU fiador ativo
   vinculado — validado no service, não confia em nada vindo do cliente além
   dos valores numéricos.
+- **Exclusão de contrato é lógica, nunca física**: `excluirContrato` só marca
+  `status: EXCLUIDO` + `deletedAt`, igual a `encerrarContrato`. O contrato
+  nunca é removido do banco, então nenhuma fatura/pagamento/aditivo/renovação
+  que referencia esse contrato (chaves estrangeiras sem cascade) fica órfã.
+  Só as faturas ainda `PENDENTE` desse contrato são canceladas (saem de "a
+  receber"); faturas `PAGO`/`ATRASADO` são preservadas como histórico. A
+  operação é sempre escopada por `contratoId` — nunca toca em faturas de
+  outro contrato, mesmo do mesmo inquilino/imóvel. Exige ADMIN logado.
 - **Fiador é verificado antes de vincular**: precisa existir, não estar
   soft-deletado e estar `ativo`; senão o contrato não é criado.
 - **Imóvel não pode ser alugado duas vezes**: contrato só é criado se o

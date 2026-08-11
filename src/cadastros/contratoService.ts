@@ -1,12 +1,11 @@
 import { PrismaClient } from "@prisma/client";
 import { AppError } from "../lib/errors";
-import { ResponsavelIptu, StatusContrato, StatusImovel, TipoGarantia } from "../lib/status";
+import { ResponsavelIptu, StatusContrato, StatusFatura, StatusImovel, TipoGarantia } from "../lib/status";
 import { buscarImovelDisponivel } from "./imovelService";
 import { buscarInquilino } from "./inquilinoService";
 import { buscarFiadorAtivo } from "./fiadorService";
 import { gerarParcelasContrato } from "../financeiro/faturaService";
 import { registrarLog } from "../lib/log";
-import { formatarReais } from "../lib/dinheiro";
 
 const ENTIDADE = "Contrato";
 
@@ -30,17 +29,16 @@ export interface CriarContratoInput {
 }
 
 /**
- * Valida a regra de garantia obrigatória: caução ≥ 3x o aluguel OU fiador ativo vinculado.
- * Lança AppError com mensagem específica para cada caso de violação.
+ * Valida a regra de garantia obrigatória: caução (qualquer valor > 0) OU fiador ativo
+ * vinculado. Lança AppError com mensagem específica para cada caso de violação.
+ *
+ * Não há mais piso de "3x o aluguel" — o valor da caução é uma decisão comercial do
+ * usuário, não uma proporção calculada automaticamente a partir do aluguel.
  */
 async function validarGarantia(prisma: PrismaClient, dados: CriarContratoInput) {
   if (dados.tipoGarantia === TipoGarantia.CAUCAO) {
-    const minimo = dados.valorAluguel * 3;
-    if (!dados.valorCaucao || dados.valorCaucao < minimo) {
-      throw new AppError(
-        422,
-        `Caução deve ser de no mínimo 3x o valor do aluguel (mínimo: ${formatarReais(minimo)})`
-      );
+    if (!dados.valorCaucao || dados.valorCaucao <= 0) {
+      throw new AppError(422, "Contrato com garantia por caução exige um valorCaucao maior que zero");
     }
     return { fiadorId: undefined };
   }
@@ -258,4 +256,55 @@ export async function renovarContrato(
   });
 
   return novoContrato;
+}
+
+/**
+ * Exclui um contrato (ex.: quebrado antes do prazo, cadastro feito por engano).
+ * É uma exclusão lógica, não física: o contrato nunca é removido do banco, só
+ * marcado como EXCLUIDO + deletedAt, exatamente como encerrarContrato faz para
+ * ENCERRADO — assim nenhuma fatura, pagamento, aditivo ou renovação que referencia
+ * este contrato (FKs sem cascade) fica órfã ou quebra a exclusão.
+ *
+ * Faturas ainda PENDENTES (parcelas futuras não pagas) são canceladas — saem de
+ * "a receber"/inadimplência, já que o contrato não existe mais. Faturas PAGO ou
+ * ATRASADO são preservadas intactas: são histórico financeiro real (já aconteceu
+ * um pagamento, ou uma cobrança já venceu) e não devem desaparecer por causa da
+ * exclusão do contrato — servem de auditoria mesmo depois.
+ *
+ * Escopado sempre por contratoId: nunca toca em faturas/pagamentos de outro
+ * contrato, mesmo que seja do mesmo inquilino ou imóvel.
+ */
+export async function excluirContrato(prisma: PrismaClient, id: string, usuario = "desconhecido") {
+  const contrato = await buscarContrato(prisma, id);
+
+  const resultado = await prisma.$transaction(async (tx) => {
+    const { count: faturasCanceladas } = await tx.fatura.updateMany({
+      where: { contratoId: id, status: StatusFatura.PENDENTE },
+      data: { status: StatusFatura.CANCELADO },
+    });
+
+    const contratoExcluido = await tx.contrato.update({
+      where: { id },
+      data: { status: StatusContrato.EXCLUIDO, deletedAt: new Date() },
+    });
+
+    // Só libera o imóvel se este contrato era quem o mantinha ocupado — um
+    // contrato já ENCERRADO/SUSPENSO não deveria mais estar segurando o imóvel,
+    // mas a checagem evita liberar por engano um imóvel ocupado por outro motivo.
+    if (contrato.status === StatusContrato.ATIVO) {
+      await tx.imovel.update({ where: { id: contrato.imovelId }, data: { status: StatusImovel.DISPONIVEL } });
+    }
+
+    return { contratoExcluido, faturasCanceladas };
+  });
+
+  await registrarLog(prisma, {
+    entidade: ENTIDADE,
+    entidadeId: id,
+    acao: "EXCLUIDO",
+    usuario,
+    detalhes: { faturasCanceladas: resultado.faturasCanceladas },
+  });
+
+  return resultado.contratoExcluido;
 }

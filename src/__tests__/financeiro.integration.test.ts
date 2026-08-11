@@ -66,7 +66,8 @@ describe("fluxo de fatura e pagamento", () => {
 
     expect(atualizadas).toHaveLength(1);
     expect(atualizadas[0].status).toBe("ATRASADO");
-    expect(atualizadas[0].valorMulta).toBeCloseTo(20, 2);
+    // Multa contratual padrão agora é 10% (era 2%) — ver default em prisma/schema.prisma.
+    expect(atualizadas[0].valorMulta).toBeCloseTo(100, 2);
     expect(atualizadas[0].valorJuros).toBeGreaterThan(0);
 
     const { total, quantidade } = await inadimplencia(prisma);

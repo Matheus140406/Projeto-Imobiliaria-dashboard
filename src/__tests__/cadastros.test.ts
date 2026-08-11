@@ -77,8 +77,8 @@ describe("fiador precisa existir e estar ativo antes de vincular", () => {
   });
 });
 
-describe("regra de garantia obrigatória: caução ≥ 3x aluguel OU fiador ativo", () => {
-  it("rejeita contrato com caução menor que 3x o aluguel", async () => {
+describe("regra de garantia obrigatória: caução (qualquer valor > 0) OU fiador ativo", () => {
+  it("rejeita contrato com garantia CAUCAO sem valorCaucao informado", async () => {
     const inquilino = await criarInquilino(prisma, { nome: "Inquilino", cpf: CPF_VALIDO_1 });
     const imovel = await criarImovel(prisma, { endereco: "Rua A, 1", valorPadrao: 1000 });
 
@@ -89,11 +89,64 @@ describe("regra de garantia obrigatória: caução ≥ 3x aluguel OU fiador ativ
         valorAluguel: 1000,
         diaVencimento: 5,
         tipoGarantia: "CAUCAO",
-        valorCaucao: 2000, // deveria ser >= 3000
         dataInicio: new Date("2026-01-01"),
         dataFim: new Date("2026-04-01"),
       })
-    ).rejects.toThrow(/no mínimo 3x/);
+    ).rejects.toThrow(/valorCaucao maior que zero/);
+  });
+
+  it("rejeita contrato com valorCaucao zero ou negativo", async () => {
+    const inquilino = await criarInquilino(prisma, { nome: "Inquilino", cpf: CPF_VALIDO_1 });
+    const imovel = await criarImovel(prisma, { endereco: "Rua A, 1", valorPadrao: 1000 });
+
+    await expect(
+      criarContrato(prisma, {
+        inquilinoId: inquilino.id,
+        imovelId: imovel.id,
+        valorAluguel: 1000,
+        diaVencimento: 5,
+        tipoGarantia: "CAUCAO",
+        valorCaucao: 0,
+        dataInicio: new Date("2026-01-01"),
+        dataFim: new Date("2026-04-01"),
+      })
+    ).rejects.toThrow(/valorCaucao maior que zero/);
+  });
+
+  it("aceita caução menor que 3x o aluguel (não há mais piso mínimo)", async () => {
+    const inquilino = await criarInquilino(prisma, { nome: "Inquilino", cpf: CPF_VALIDO_1 });
+    const imovel = await criarImovel(prisma, { endereco: "Rua A, 1", valorPadrao: 1000 });
+
+    const contrato = await criarContrato(prisma, {
+      inquilinoId: inquilino.id,
+      imovelId: imovel.id,
+      valorAluguel: 1000,
+      diaVencimento: 5,
+      tipoGarantia: "CAUCAO",
+      valorCaucao: 200, // bem menor que 3x (3000) — deve ser aceito exatamente como informado
+      dataInicio: new Date("2026-01-01"),
+      dataFim: new Date("2026-04-01"),
+    });
+
+    expect(contrato.valorCaucao).toBe(200);
+  });
+
+  it("aceita caução maior que 3x o aluguel, salvando exatamente o valor informado", async () => {
+    const inquilino = await criarInquilino(prisma, { nome: "Inquilino", cpf: CPF_VALIDO_1 });
+    const imovel = await criarImovel(prisma, { endereco: "Rua A, 1", valorPadrao: 1000 });
+
+    const contrato = await criarContrato(prisma, {
+      inquilinoId: inquilino.id,
+      imovelId: imovel.id,
+      valorAluguel: 1000,
+      diaVencimento: 5,
+      tipoGarantia: "CAUCAO",
+      valorCaucao: 50000, // bem maior que 3x (3000) — não deve ser truncado/recalculado
+      dataInicio: new Date("2026-01-01"),
+      dataFim: new Date("2026-04-01"),
+    });
+
+    expect(contrato.valorCaucao).toBe(50000);
   });
 
   it("rejeita contrato com garantia FIADOR sem fiadorId", async () => {
@@ -253,7 +306,7 @@ describe("geração automática de parcelas (1 por mês do contrato)", () => {
 });
 
 describe("erros de negócio usam AppError com status apropriado", () => {
-  it("valorCaucao insuficiente gera 422", async () => {
+  it("valorCaucao ausente em garantia CAUCAO gera 422", async () => {
     const inquilino = await criarInquilino(prisma, { nome: "Inquilino", cpf: CPF_VALIDO_3 });
     const imovel = await criarImovel(prisma, { endereco: "Rua F, 6", valorPadrao: 1000 });
 
@@ -264,7 +317,6 @@ describe("erros de negócio usam AppError com status apropriado", () => {
         valorAluguel: 1000,
         diaVencimento: 5,
         tipoGarantia: "CAUCAO",
-        valorCaucao: 100,
         dataInicio: new Date("2026-01-01"),
         dataFim: new Date("2026-04-01"),
       });

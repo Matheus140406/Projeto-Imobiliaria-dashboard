@@ -82,8 +82,11 @@ model Contrato {
   fiadorId        String?
   valorAluguel    Int
   diaVencimento   Int
-  percentualMulta Float      @default(2)
-  taxaJurosDiaria Float      @default(0.033)
+  // Multa fixa por atraso (%) e juros de mora por dia de atraso (%), ambos sobre
+  // o valor original da parcela (nunca sobre a própria multa ou juros já
+  // acumulados) — ver calcularMultaEJuros em src/financeiro/calculoAtraso.ts.
+  percentualMulta Float      @default(10)
+  taxaJurosDiaria Float      @default(0.5)
   tipoGarantia    String
   valorCaucao     Int?
   // Quem paga o IPTU do imóvel durante a vigência: "INQUILINO" ou "PROPRIETARIO".
