@@ -111,6 +111,8 @@ model Contrato {
   @@index([fiadorId])
   @@index([status])
   @@index([deletedAt])
+  // Usado por contratosVencendo (dashboardService): status = ATIVO + dataFim numa janela.
+  @@index([dataFim])
 }
 
 // Aditivo contratual: registra um ajuste (reajuste de aluguel e/ou de dia de
@@ -152,6 +154,13 @@ model Fatura {
   @@index([status])
   @@index([dataVencimento])
   @@index([tipo])
+  // Filtros por competência (dashboardService.aplicarFiltros) e por contrato+status
+  // (excluirContrato/encerrarContrato/aditivoService, todos fazem updateMany/findMany
+  // por contratoId + status) se beneficiam de índices dedicados em vez de scan completo.
+  @@index([competencia])
+  @@index([contratoId, status])
+  // faturasAtrasadasRecentemente filtra status + updatedAt e ordena por updatedAt.
+  @@index([status, updatedAt])
 }
 
 model Pagamento {

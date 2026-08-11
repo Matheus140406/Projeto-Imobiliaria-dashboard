@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, ApiError, setToken } from "../lib/api";
+import { api, ApiError, setSessao, type UsuarioLogado } from "../lib/api";
 import { Btn, ErroBox, Field, Input } from "./ui";
 
 export function Login({ onEntrar }: { onEntrar: () => void }) {
@@ -16,8 +16,11 @@ export function Login({ onEntrar }: { onEntrar: () => void }) {
     setErro("");
     setCarregando(true);
     try {
-      const resposta = await api.post<{ token: string }>("/auth/login", { email: email.trim(), senha });
-      setToken(resposta.token);
+      const resposta = await api.post<{ token: string; usuario: UsuarioLogado }>("/auth/login", {
+        email: email.trim(),
+        senha,
+      });
+      setSessao(resposta.token, resposta.usuario);
       onEntrar();
     } catch (e) {
       setErro(e instanceof ApiError ? e.message : "Falha ao entrar");

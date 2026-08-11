@@ -48,11 +48,24 @@ banco). Detalhes de RBAC/JWT em `SECURITY.md`/`README.md` na raiz do projeto.
   vencendo), fila de faturas em atraso com reenvio de cobrança, ações
   rápidas.
 - **Financeiro**: listagem de faturas com filtros, detalhe com cálculo de
-  multa/juros ao vivo, registro de pagamento.
-- **Contratos**: listagem, criação (assistente simplificado) e detalhe com
-  histórico de parcelas.
-- **Imóveis**: listagem com contadores por status e cadastro de novo imóvel.
-- **Cadastros**: inquilinos e fiadores, com cadastro rápido.
+  multa/juros ao vivo, registro de pagamento, exportação para CSV.
+- **Contratos**: listagem, criação (com garantia por caução ou fiador) e
+  detalhe com histórico de parcelas, aditivos, download do contrato
+  (PDF/texto), aditivo contratual, renovação e encerramento/exclusão
+  (ações de ADMIN).
+- **Imóveis**: listagem com contadores por status, cadastro, edição e
+  exclusão (exclusão é ação de ADMIN; imóvel alugado não pode ser excluído).
+- **Cadastros**: inquilinos e fiadores — cadastro, edição e exclusão
+  (exclusão é ação de ADMIN; bloqueada se houver contrato ativo vinculado).
+
+## Permissões (RBAC)
+
+Ações destrutivas (excluir cadastro/imóvel/contrato, encerrar ou renovar
+contrato) só aparecem na interface para usuários logados com papel `ADMIN` —
+o frontend guarda o papel devolvido pelo login e usa isso só para
+esconder/mostrar botões; a autorização de verdade sempre é feita pelo
+backend. Se o token expirar ou for invalidado, qualquer chamada que volte
+`401` desloga automaticamente e volta para a tela de login.
 
 ## Build
 

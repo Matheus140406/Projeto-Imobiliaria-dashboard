@@ -293,7 +293,10 @@ const renovarContratoSchema = z.object({
   novoValorAluguel: valorReaisOpcional,
 });
 
-router.post("/contratos/:id/renovar", async (req, res) => {
+// Renovar encerra o contrato atual internamente (mesma operação de /encerrar) antes de
+// criar o novo — exige ADMIN pela mesma razão: sem isso, um OPERADOR conseguiria encerrar
+// qualquer contrato "por baixo" via renovação, contornando a proteção de /encerrar.
+router.post("/contratos/:id/renovar", exigirPapel("ADMIN"), async (req, res) => {
   const id = idSchema.parse(req.params.id);
   const dados = renovarContratoSchema.parse(req.body);
   res.status(201).json(paraReaisNaResposta(await renovarContrato(prisma, id, dados, req.usuario)));

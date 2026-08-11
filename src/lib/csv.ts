@@ -3,8 +3,17 @@ export interface ColunaCsv {
   titulo: string;
 }
 
+// Campos que começam com =, +, -, @, tab ou CR são interpretados como fórmula por
+// Excel/Google Sheets ao abrir o CSV ("CSV injection") — um nome de inquilino ou
+// endereço de imóvel cadastrado como `=HYPERLINK(...)` executaria ao abrir o arquivo.
+// Prefixar com apóstrofo neutraliza sem alterar o valor visível na planilha.
+const CARACTERES_DE_FORMULA = /^[=+\-@\t\r]/;
+
 function escapaCampo(valor: unknown): string {
-  const texto = valor == null ? "" : String(valor);
+  let texto = valor == null ? "" : String(valor);
+  if (CARACTERES_DE_FORMULA.test(texto)) {
+    texto = `'${texto}`;
+  }
   if (/[",\n]/.test(texto)) {
     return `"${texto.replace(/"/g, '""')}"`;
   }

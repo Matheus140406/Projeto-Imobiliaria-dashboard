@@ -50,6 +50,20 @@ export async function registrarPagamento(prisma: PrismaClient, input: RegistrarP
       );
     }
 
+    // updateMany com filtro de status (em vez de update simples) fecha a corrida entre
+    // duas requisições concorrentes lendo a mesma fatura PENDENTE: a checagem acima e
+    // o valor de `fatura.status` já lido em memória podem estar desatualizados quando
+    // esta transação chega a escrever (SQLite só serializa a ESCRITA, não a leitura
+    // anterior) — este updateMany é quem garante, na hora de escrever, que a fatura
+    // ainda não foi paga por outra chamada que "venceu a corrida" primeiro.
+    const { count } = await tx.fatura.updateMany({
+      where: { id: input.faturaId, status: { notIn: [StatusFatura.PAGO, StatusFatura.CANCELADO] } },
+      data: { status: StatusFatura.PAGO },
+    });
+    if (count === 0) {
+      throw new AppError(409, "Fatura já está paga");
+    }
+
     const pagamento = await tx.pagamento.create({
       data: {
         faturaId: input.faturaId,
@@ -61,10 +75,7 @@ export async function registrarPagamento(prisma: PrismaClient, input: RegistrarP
       },
     });
 
-    const faturaAtualizada = await tx.fatura.update({
-      where: { id: input.faturaId },
-      data: { status: StatusFatura.PAGO },
-    });
+    const faturaAtualizada = await tx.fatura.findUniqueOrThrow({ where: { id: input.faturaId } });
 
     // O scoring usa a data de vencimento real, não o campo `status` da fatura: se o
     // pagamento ocorrer antes do cron da madrugada rodar, uma fatura já vencida ontem

@@ -127,4 +127,32 @@ describe("segurança da API", () => {
     const auditoria = await prisma.auditoriaPagamento.findFirstOrThrow({ where: { faturaId: fatura.id } });
     expect(auditoria.usuario).toBe("operador-real");
   });
+
+  it("rejeita renovar contrato sem estar autenticado como ADMIN (só x-api-key não basta)", async () => {
+    const inquilino = await prisma.inquilino.create({ data: { nome: "Teste Renovar", cpf: proximoCpfDeTeste() } });
+    const imovel = await prisma.imovel.create({
+      data: { endereco: "Apto Renovar", valorPadrao: 500, status: "ALUGADO" },
+    });
+    const contrato = await prisma.contrato.create({
+      data: {
+        inquilinoId: inquilino.id,
+        imovelId: imovel.id,
+        valorAluguel: 500,
+        diaVencimento: 5,
+        tipoGarantia: "CAUCAO",
+        valorCaucao: 1500,
+        dataInicio: new Date("2026-01-01"),
+        dataFim: new Date("2026-06-01"),
+      },
+    });
+
+    const resposta = await request(app)
+      .post(`/api/contratos/${contrato.id}/renovar`)
+      .set("x-api-key", API_KEY)
+      .send({ novaDataFim: "2027-01-01" });
+
+    expect(resposta.status).toBe(401);
+    const contratoInalterado = await prisma.contrato.findUniqueOrThrow({ where: { id: contrato.id } });
+    expect(contratoInalterado.status).toBe("ATIVO");
+  });
 });

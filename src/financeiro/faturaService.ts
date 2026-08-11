@@ -28,6 +28,14 @@ export async function gerarFaturaMensal(
   referencia: Date = new Date(),
   tipo: string = TipoFatura.ALUGUEL
 ) {
+  // Defesa em profundidade: chamadores diretos do service (fora da rota HTTP, que não
+  // expõe `tipo` como parâmetro de entrada livre) não devem conseguir criar um tipo de
+  // fatura arbitrário — só ALUGUEL/IPTU têm suporte no resto do sistema (cálculo de
+  // multa/juros, relatórios, gerador de contrato).
+  if (tipo !== TipoFatura.ALUGUEL && tipo !== TipoFatura.IPTU) {
+    throw new AppError(422, "tipo de fatura inválido");
+  }
+
   const contrato = await prisma.contrato.findUniqueOrThrow({
     where: { id: contratoId },
     include: { imovel: true },
@@ -98,7 +106,13 @@ export async function gerarFaturasDoMes(prisma: PrismaClient, referencia: Date =
         faturas.push(await gerarFaturaMensal(prisma, contrato.id, referencia, TipoFatura.IPTU));
       }
     } catch (err) {
-      erros.push({ contratoId: contrato.id, erro: (err as Error).message });
+      // Nunca repassa a mensagem crua do erro ao cliente (pode vir do Prisma e expor
+      // nome de tabela/coluna) — mensagens de AppError são seguras por definição
+      // (foram escritas para o usuário), qualquer outra vira genérica; o erro completo
+      // ainda vai para o log do servidor via console.error.
+      const mensagemSegura = err instanceof AppError ? err.message : "Erro interno ao gerar fatura";
+      if (!(err instanceof AppError)) console.error(`Falha ao gerar fatura do contrato ${contrato.id}:`, err);
+      erros.push({ contratoId: contrato.id, erro: mensagemSegura });
     }
   }
 

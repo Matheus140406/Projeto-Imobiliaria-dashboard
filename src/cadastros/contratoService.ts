@@ -170,21 +170,37 @@ export async function historicoParcelas(prisma: PrismaClient, contratoId: string
   });
 }
 
-/** Encerra o contrato (soft delete) e libera o imóvel para nova locação. */
+/**
+ * Encerra o contrato (soft delete) e libera o imóvel para nova locação. Assim como
+ * excluirContrato, cancela as faturas ainda PENDENTES (parcelas futuras que não vão mais
+ * acontecer) — preserva PAGO/ATRASADO como histórico. Sem isso, essas parcelas ficariam
+ * PENDENTE para sempre e continuariam contando em "a receber"/relatórios.
+ */
 export async function encerrarContrato(prisma: PrismaClient, id: string, usuario = "desconhecido") {
   const contrato = await buscarContrato(prisma, id);
 
-  const atualizado = await prisma.$transaction(async (tx) => {
+  const resultado = await prisma.$transaction(async (tx) => {
+    const { count: faturasCanceladas } = await tx.fatura.updateMany({
+      where: { contratoId: id, status: StatusFatura.PENDENTE },
+      data: { status: StatusFatura.CANCELADO },
+    });
+
     const contratoAtualizado = await tx.contrato.update({
       where: { id },
       data: { status: StatusContrato.ENCERRADO, deletedAt: new Date() },
     });
     await tx.imovel.update({ where: { id: contrato.imovelId }, data: { status: StatusImovel.DISPONIVEL } });
-    return contratoAtualizado;
+    return { contratoAtualizado, faturasCanceladas };
   });
 
-  await registrarLog(prisma, { entidade: ENTIDADE, entidadeId: id, acao: "ENCERRADO", usuario });
-  return atualizado;
+  await registrarLog(prisma, {
+    entidade: ENTIDADE,
+    entidadeId: id,
+    acao: "ENCERRADO",
+    usuario,
+    detalhes: { faturasCanceladas: resultado.faturasCanceladas },
+  });
+  return resultado.contratoAtualizado;
 }
 
 export interface RenovarContratoInput {

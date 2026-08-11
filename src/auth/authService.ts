@@ -23,6 +23,11 @@ export interface CriarUsuarioInput {
 }
 
 async function criarUsuarioInterno(prisma: PrismaClient, dados: CriarUsuarioInput) {
+  // Defesa em profundidade: o zod da rota já restringe `papel` a ADMIN/OPERADOR, mas uma
+  // chamada direta ao service (sem passar pela rota) poderia gravar qualquer string.
+  if (dados.papel && dados.papel !== Papel.ADMIN && dados.papel !== Papel.OPERADOR) {
+    throw new AppError(422, "papel deve ser ADMIN ou OPERADOR");
+  }
   const senhaHash = await bcrypt.hash(dados.senha, SALT_ROUNDS);
   try {
     const usuario = await prisma.usuario.create({

@@ -148,13 +148,15 @@ de falhar.
 npm test
 ```
 
-71 testes automatizados (unitários + integração com SQLite + HTTP via
+91 testes automatizados (unitários + integração com SQLite + HTTP via
 supertest), cobrindo: cálculo de multa/juros (em centavos), geração/
-idempotência de faturas, pagamento parcial rejeitado, scoring com status
-desatualizado, concorrência, regra de garantia, disponibilidade de imóvel,
-sobreposição de datas, geração de parcelas (aluguel + IPTU), edição de
-cadastros, log de atividade, gerador de contrato (texto/PDF), soft delete,
-autenticação, conversão reais↔centavos, aditivo contratual, renovação de
+idempotência de faturas, pagamento parcial rejeitado, pagamento concorrente
+(só um vence a corrida), scoring com status desatualizado, concorrência,
+regra de garantia, disponibilidade de imóvel, sobreposição de datas, geração
+de parcelas (aluguel + IPTU), edição de cadastros, exclusão com bloqueio por
+contrato ativo, log de atividade, gerador de contrato (texto/PDF), soft
+delete, autenticação, RBAC (rota de renovação exige ADMIN), CSV injection,
+conversão reais↔centavos, aditivo contratual, renovação de
 contrato e não vazamento de erros internos.
 
 CI no GitHub Actions (`.github/workflows/ci.yml`) roda type check, testes e
@@ -177,7 +179,7 @@ build a cada push/PR.
   histórico, libera o imóvel (exige ADMIN logado)
 - `POST /api/contratos/:id/aditivos` — registra aditivo (novo valor/vencimento a partir de uma data)
 - `GET /api/contratos/:id/aditivos` — histórico de aditivos do contrato
-- `POST /api/contratos/:id/renovar` — renova o contrato (encerra o atual, cria um novo vinculado)
+- `POST /api/contratos/:id/renovar` — renova o contrato (encerra o atual, cria um novo vinculado; exige ADMIN logado)
 - `GET /api/contratos/:id/documento/avisos` — dicas do que falta/é recomendado
 - `GET /api/contratos/:id/documento?formato=pdf|texto` — baixa o contrato
 

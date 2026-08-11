@@ -78,6 +78,13 @@ export async function atualizarImovel(
   if (dados.status && imovel.status === StatusImovel.ALUGADO) {
     throw new AppError(409, "Imóvel alugado tem o status controlado pelo contrato; encerre o contrato primeiro");
   }
+  // Defesa em profundidade: o tipo TypeScript já restringe status a DISPONIVEL/MANUTENCAO,
+  // mas isso não existe em runtime — uma chamada direta ao service (sem passar pelo zod
+  // da rota) poderia gravar "ALUGADO" à mão, contornando o controle de ciclo de vida
+  // do imóvel que só criarContrato/encerrarContrato/excluirContrato deveriam gerenciar.
+  if (dados.status && dados.status !== StatusImovel.DISPONIVEL && dados.status !== StatusImovel.MANUTENCAO) {
+    throw new AppError(422, "status deve ser DISPONIVEL ou MANUTENCAO");
+  }
 
   const atualizado = await prisma.imovel.update({ where: { id }, data: dados });
   await registrarLog(prisma, { entidade: ENTIDADE, entidadeId: id, acao: "ATUALIZADO", usuario, detalhes: dados });

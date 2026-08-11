@@ -40,8 +40,18 @@ const limitadorPagamentos = rateLimit({
   legacyHeaders: false,
 });
 
+// Login é alvo natural de força bruta de senha (mesmo com bcrypt) — limite bem mais
+// apertado que o global, que é folgado demais (300/15min) para essa rota específica.
+const limitadorLogin = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 app.use("/api", limitadorGlobal, autenticar(env.API_KEY, env.JWT_SECRET));
 app.use("/api/faturas/:faturaId/pagamentos", limitadorPagamentos);
+app.use("/api/auth/login", limitadorLogin);
 app.use("/api", router);
 
 app.use(tratadorDeErros);
