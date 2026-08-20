@@ -23,15 +23,8 @@ function hash(valor: string): Buffer {
 /**
  * Compara em tempo constante independente do tamanho das entradas: comparar os hashes
  * (sempre 32 bytes) evita que o tempo de resposta vaze até o comprimento da chave real.
-<<<<<<< HEAD
- * Exportada para outros pontos que comparam segredos vindos de header (ex.: o token de
- * bootstrap do primeiro admin em routes.ts) e não deveriam reimplementar a comparação.
- */
-export function comparaEmTempoConstante(a: string, b: string): boolean {
-=======
  */
 function comparaEmTempoConstante(a: string, b: string): boolean {
->>>>>>> d5d4019ae8fe72d9862fd6150a770e5f868d6311
   return timingSafeEqual(hash(a), hash(b));
 }
 

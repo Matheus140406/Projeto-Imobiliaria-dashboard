@@ -54,11 +54,7 @@ import { registrarLog } from "./lib/log";
 import { paraReaisNaResposta, reaisParaCentavos } from "./lib/dinheiro";
 import { enviarEmail, envioDeEmailConfigurado } from "./lib/email";
 import { criarUsuario, login, registrarPrimeiroAdmin } from "./auth/authService";
-<<<<<<< HEAD
-import { comparaEmTempoConstante, exigirPapel } from "./middleware/auth";
-=======
 import { exigirPapel } from "./middleware/auth";
->>>>>>> d5d4019ae8fe72d9862fd6150a770e5f868d6311
 import { carregarEnv } from "./lib/env";
 
 export const router = Router();
@@ -92,23 +88,7 @@ const registrarAdminSchema = z.object({
   senha: z.string().min(8).max(200),
 });
 
-<<<<<<< HEAD
-// A x-api-key sozinha NÃO basta aqui: ela é embutida no bundle público do frontend (ver
-// frontend/src/lib/api.ts), então qualquer pessoa que a extraia do DevTools conseguiria
-// chamar esta rota. Sem um segredo adicional que nunca vai para o frontend, a primeira
-// pessoa a acertar essa corrida — não necessariamente o dono do sistema — vira o ADMIN
-// inicial. Exige ADMIN_BOOTSTRAP_TOKEN (só o operador do deploy conhece, usado uma única
-// vez via curl/Postman); se a env não estiver configurada, a rota fica desabilitada.
 router.post("/auth/registrar-primeiro-admin", async (req, res) => {
-  const env = carregarEnv();
-  const tokenRecebido = req.header("x-admin-bootstrap-token");
-  if (!env.ADMIN_BOOTSTRAP_TOKEN || !tokenRecebido || !comparaEmTempoConstante(tokenRecebido, env.ADMIN_BOOTSTRAP_TOKEN)) {
-    res.status(404).json({ erro: "Não encontrado" });
-    return;
-  }
-=======
-router.post("/auth/registrar-primeiro-admin", async (req, res) => {
->>>>>>> d5d4019ae8fe72d9862fd6150a770e5f868d6311
   const dados = registrarAdminSchema.parse(req.body);
   const usuario = await registrarPrimeiroAdmin(prisma, dados);
   res.status(201).json({ id: usuario.id, nome: usuario.nome, email: usuario.email, papel: usuario.papel });
