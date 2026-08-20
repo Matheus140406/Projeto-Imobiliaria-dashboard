@@ -1,0 +1,42 @@
+export const StatusFatura = {
+  PENDENTE: "PENDENTE",
+  PAGO: "PAGO",
+  ATRASADO: "ATRASADO",
+  CANCELADO: "CANCELADO",
+} as const;
+export type StatusFatura = (typeof StatusFatura)[keyof typeof StatusFatura];
+
+export const StatusContrato = {
+  ATIVO: "ATIVO",
+  ENCERRADO: "ENCERRADO",
+  SUSPENSO: "SUSPENSO",
+  // Contrato removido pelo usuário (ex.: quebrado antes do prazo, cadastro
+  // duplicado/errado) — distinto de ENCERRADO, que é o fim natural do prazo.
+  EXCLUIDO: "EXCLUIDO",
+} as const;
+export type StatusContrato = (typeof StatusContrato)[keyof typeof StatusContrato];
+
+export const StatusImovel = {
+  DISPONIVEL: "DISPONIVEL",
+  ALUGADO: "ALUGADO",
+  MANUTENCAO: "MANUTENCAO",
+} as const;
+export type StatusImovel = (typeof StatusImovel)[keyof typeof StatusImovel];
+
+export const TipoGarantia = {
+  CAUCAO: "CAUCAO",
+  FIADOR: "FIADOR",
+} as const;
+export type TipoGarantia = (typeof TipoGarantia)[keyof typeof TipoGarantia];
+
+export const TipoFatura = {
+  ALUGUEL: "ALUGUEL",
+  IPTU: "IPTU",
+} as const;
+export type TipoFatura = (typeof TipoFatura)[keyof typeof TipoFatura];
+
+export const ResponsavelIptu = {
+  INQUILINO: "INQUILINO",
+  PROPRIETARIO: "PROPRIETARIO",
+} as const;
+export type ResponsavelIptu = (typeof ResponsavelIptu)[keyof typeof ResponsavelIptu];
