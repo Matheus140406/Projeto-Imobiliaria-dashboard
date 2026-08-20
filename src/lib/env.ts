@@ -13,12 +13,15 @@ const envSchema = z.object({
   // Só usado pelo endpoint /cron/marcar-atrasadas (chamado pelo Vercel Cron em produção
   // serverless, que não roda node-cron in-process). Ausente = endpoint fica desabilitado.
   CRON_SECRET: z.string().min(16).optional(),
+<<<<<<< HEAD
   // Protege /auth/registrar-primeiro-admin. Diferente da API_KEY (embutida no bundle do
   // frontend e por isso pública — ver frontend/src/lib/api.ts), este token nunca deve ir
   // para o frontend: só quem faz o deploy o conhece, e usa uma única vez (curl/Postman)
   // para criar a conta ADMIN inicial. Ausente = endpoint fica desabilitado, para não deixar
   // em aberto uma corrida em que qualquer pessoa com a API_KEY pública vira o primeiro ADMIN.
   ADMIN_BOOTSTRAP_TOKEN: z.string().min(16).optional(),
+=======
+>>>>>>> d5d4019ae8fe72d9862fd6150a770e5f868d6311
 });
 
 export type Env = z.infer<typeof envSchema>;

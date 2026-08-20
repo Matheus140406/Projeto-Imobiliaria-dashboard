@@ -31,6 +31,7 @@ sentido); é uma troca aceitável aqui porque o app roda localmente entre vocês
 dois, mas não é o padrão recomendado para uma aplicação exposta na internet.
 
 Para logar você precisa de um usuário cadastrado. O primeiro é criado assim
+<<<<<<< HEAD
 (rode uma vez, com a API rodando e `ADMIN_BOOTSTRAP_TOKEN` definida no `.env`
 do backend — esse token é diferente da API Key: nunca vai para o frontend):
 
@@ -38,12 +39,23 @@ do backend — esse token é diferente da API Key: nunca vai para o frontend):
 curl -X POST http://localhost:3000/api/auth/registrar-primeiro-admin \
   -H "x-api-key: SUA_API_KEY" -H "x-admin-bootstrap-token: SEU_ADMIN_BOOTSTRAP_TOKEN" \
   -H "Content-Type: application/json" \
+=======
+(rode uma vez, com a API rodando):
+
+```bash
+curl -X POST http://localhost:3000/api/auth/registrar-primeiro-admin \
+  -H "x-api-key: SUA_API_KEY" -H "Content-Type: application/json" \
+>>>>>>> d5d4019ae8fe72d9862fd6150a770e5f868d6311
   -d '{"nome":"Seu Nome","email":"voce@email.com","senha":"uma-senha-com-8-ou-mais-caracteres"}'
 ```
 
 Esse endpoint só funciona uma vez (enquanto não existir nenhum usuário no
+<<<<<<< HEAD
 banco) e só com o `x-admin-bootstrap-token` correto — sem isso, responde 404.
 Detalhes de RBAC/JWT em `SECURITY.md`/`README.md` na raiz do projeto.
+=======
+banco). Detalhes de RBAC/JWT em `SECURITY.md`/`README.md` na raiz do projeto.
+>>>>>>> d5d4019ae8fe72d9862fd6150a770e5f868d6311
 
 ## Telas
 

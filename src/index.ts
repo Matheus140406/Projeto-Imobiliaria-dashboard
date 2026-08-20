@@ -61,6 +61,7 @@ const limitadorLogin = rateLimit({
   legacyHeaders: false,
 });
 
+<<<<<<< HEAD
 // Bootstrap do primeiro ADMIN: já é protegido por ADMIN_BOOTSTRAP_TOKEN (ver routes.ts),
 // mas um limite bem apertado reduz ainda mais a superfície para tentativas de força bruta
 // do token por quem só tem a x-api-key pública.
@@ -75,6 +76,11 @@ app.use("/api", limitadorGlobal, autenticar(env.API_KEY, env.JWT_SECRET));
 app.use("/api/faturas/:faturaId/pagamentos", limitadorPagamentos);
 app.use("/api/auth/login", limitadorLogin);
 app.use("/api/auth/registrar-primeiro-admin", limitadorBootstrapAdmin);
+=======
+app.use("/api", limitadorGlobal, autenticar(env.API_KEY, env.JWT_SECRET));
+app.use("/api/faturas/:faturaId/pagamentos", limitadorPagamentos);
+app.use("/api/auth/login", limitadorLogin);
+>>>>>>> d5d4019ae8fe72d9862fd6150a770e5f868d6311
 app.use("/api", router);
 
 app.use(tratadorDeErros);
