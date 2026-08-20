@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { CircleCheck, Search, Send } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CircleCheck, Download, Search, Send } from "lucide-react";
 import { api, ApiError } from "../lib/api";
 import type { DetalheFatura, Fatura, Metodo } from "../lib/types";
 import { Btn, ErroBox, Field, Input, Modal, PageHeader, Select, Spinner, StatusBadge, brl, fmtDate } from "../components/ui";
@@ -15,18 +15,39 @@ export function Financeiro() {
   const [selecionada, setSelecionada] = useState<string | null>(null);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
+  const [exportando, setExportando] = useState(false);
+  // Guarda contra troca rápida de filtro: só aplica a resposta se ainda for a
+  // requisição mais recente — sem isso, uma resposta lenta de um filtro anterior
+  // pode chegar depois e sobrescrever a lista já filtrada mais recentemente.
+  const requisicaoAtual = useRef(0);
 
   async function carregar() {
+    const idDestaRequisicao = ++requisicaoAtual.current;
     setCarregando(true);
     setErro("");
     try {
       const query = filtro === "atrasados" ? "?status=ATRASADO" : filtro === "pagos" ? "?status=PAGO" : "";
       const resposta = await api.get<Fatura[]>(`/faturas${query}`);
+      if (idDestaRequisicao !== requisicaoAtual.current) return;
       setFaturas(resposta);
     } catch (e) {
+      if (idDestaRequisicao !== requisicaoAtual.current) return;
       setErro(e instanceof ApiError ? e.message : "Falha ao carregar faturas");
     } finally {
-      setCarregando(false);
+      if (idDestaRequisicao === requisicaoAtual.current) setCarregando(false);
+    }
+  }
+
+  async function exportarCsv() {
+    setExportando(true);
+    setErro("");
+    try {
+      const query = filtro === "atrasados" ? "?status=ATRASADO" : filtro === "pagos" ? "?status=PAGO" : "";
+      await api.baixar(`/relatorios/faturas.csv${query}`, "faturas.csv");
+    } catch (e) {
+      setErro(e instanceof ApiError ? e.message : "Falha ao exportar CSV");
+    } finally {
+      setExportando(false);
     }
   }
 
@@ -61,7 +82,15 @@ export function Financeiro() {
 
   return (
     <div>
-      <PageHeader title="Controle Financeiro" sub="Gestão de faturas e recebimentos" />
+      <PageHeader
+        title="Controle Financeiro"
+        sub="Gestão de faturas e recebimentos"
+        action={
+          <Btn variant="outline" size="sm" icon={<Download size={13} />} onClick={exportarCsv} disabled={exportando}>
+            {exportando ? "Exportando…" : "Exportar CSV"}
+          </Btn>
+        }
+      />
 
       {erro && <ErroBox mensagem={erro} />}
 
@@ -138,11 +167,24 @@ function InvoiceDetailModal({ faturaId, onClose, onAtualizado }: { faturaId: str
   const [enviado, setEnviado] = useState(false);
 
   useEffect(() => {
+    let cancelado = false;
+    setDetalhe(null);
+    setErro("");
+    setCarregando(true);
     api
       .get<DetalheFatura>(`/faturas/${faturaId}`)
-      .then(setDetalhe)
-      .catch((e) => setErro(e instanceof ApiError ? e.message : "Falha ao carregar fatura"))
-      .finally(() => setCarregando(false));
+      .then((d) => {
+        if (!cancelado) setDetalhe(d);
+      })
+      .catch((e) => {
+        if (!cancelado) setErro(e instanceof ApiError ? e.message : "Falha ao carregar fatura");
+      })
+      .finally(() => {
+        if (!cancelado) setCarregando(false);
+      });
+    return () => {
+      cancelado = true;
+    };
   }, [faturaId]);
 
   async function registrarPagamento() {

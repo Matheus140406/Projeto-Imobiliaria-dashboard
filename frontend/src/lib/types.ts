@@ -71,6 +71,17 @@ export interface DetalheFatura extends Fatura {
   pagamentos: { id: string; valorPago: number; dataPagamento: string; metodo: Metodo }[];
 }
 
+export interface Aditivo {
+  id: string;
+  contratoId: string;
+  dataVigencia: string;
+  novoValorAluguel?: number | null;
+  novoDiaVencimento?: number | null;
+  motivo?: string | null;
+  criadoPor: string;
+  createdAt: string;
+}
+
 export interface Resumo {
   receitas: { total: number; quantidade: number };
   inadimplencia: { total: number; quantidade: number };

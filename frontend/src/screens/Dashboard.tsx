@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AlertTriangle, Bell, CalendarClock, CheckCircle2, ChevronRight, ClipboardList, Clock, RefreshCw, Send, TrendingUp } from "lucide-react";
+import { AlertTriangle, CalendarClock, CheckCircle2, ChevronRight, ClipboardList, Clock, RefreshCw, Send, TrendingUp } from "lucide-react";
 import { api, ApiError } from "../lib/api";
 import type { Contrato, Fatura, Resumo } from "../lib/types";
 import type { Screen } from "../App";
@@ -37,11 +37,14 @@ export function Dashboard({ setScreen }: { setScreen: (s: Screen) => void }) {
   }, []);
 
   async function reenviarCobranca(faturaId: string) {
-    setEnviando((s) => new Set([...s, faturaId]));
+    setErro("");
     try {
       await api.post(`/faturas/${faturaId}/reenviar-cobranca`);
-    } catch {
-      // já reportado via banner de erro na próxima ação relevante; aqui só evita travar o botão
+      // Só marca como "Enviado" depois que a chamada realmente teve sucesso — antes
+      // disso o botão marcava sucesso mesmo quando a chamada falhava.
+      setEnviando((s) => new Set([...s, faturaId]));
+    } catch (e) {
+      setErro(e instanceof ApiError ? e.message : "Falha ao reenviar cobrança");
     }
   }
 
@@ -53,14 +56,9 @@ export function Dashboard({ setScreen }: { setScreen: (s: Screen) => void }) {
         title="Dashboard"
         sub="Visão geral do escritório"
         action={
-          <div style={{ display: "flex", gap: 8 }}>
-            <Btn variant="outline" size="sm" icon={<Bell size={13} />}>
-              Alertas
-            </Btn>
-            <Btn size="sm" icon={<RefreshCw size={13} />} onClick={carregar}>
-              Sincronizar
-            </Btn>
-          </div>
+          <Btn size="sm" icon={<RefreshCw size={13} />} onClick={carregar}>
+            Sincronizar
+          </Btn>
         }
       />
 

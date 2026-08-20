@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Sidebar } from "./components/Sidebar";
 import { Login } from "./components/Login";
-import { estaAutenticado } from "./lib/api";
+import { aoReceberNaoAutorizado, estaAutenticado } from "./lib/api";
 import { Dashboard } from "./screens/Dashboard";
 import { Financeiro } from "./screens/Financeiro";
 import { Contratos } from "./screens/Contratos";
@@ -13,6 +13,13 @@ export type Screen = "dashboard" | "financeiro" | "contratos" | "imoveis" | "cad
 export default function App() {
   const [autenticado, setAutenticado] = useState(estaAutenticado());
   const [screen, setScreen] = useState<Screen>("dashboard");
+
+  useEffect(() => {
+    // Se o token expirar/for invalidado no meio do uso, qualquer chamada à API que
+    // devolver 401 dispara isto — desloga e volta pra tela de login em vez de deixar
+    // todas as telas presas em "Falha ao carregar" pra sempre.
+    aoReceberNaoAutorizado(() => setAutenticado(false));
+  }, []);
 
   if (!autenticado) {
     return <Login onEntrar={() => setAutenticado(true)} />;

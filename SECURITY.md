@@ -59,9 +59,18 @@ quanto os cadastros (inquilino, fiador, imóvel, contrato).
   formato — rejeita sequências como `111.111.111-11` que passam numa checagem
   ingênua de tamanho. CPF duplicado retorna erro amigável (409), não o erro
   bruto do banco.
-- **Garantia obrigatória em contrato**: caução ≥ 3x o aluguel OU fiador ativo
+- **Garantia obrigatória em contrato**: caução (qualquer valor > 0 — decisão
+  comercial do usuário, sem piso automático de "3x o aluguel") OU fiador ativo
   vinculado — validado no service, não confia em nada vindo do cliente além
   dos valores numéricos.
+- **Exclusão de contrato é lógica, nunca física**: `excluirContrato` só marca
+  `status: EXCLUIDO` + `deletedAt`, igual a `encerrarContrato`. O contrato
+  nunca é removido do banco, então nenhuma fatura/pagamento/aditivo/renovação
+  que referencia esse contrato (chaves estrangeiras sem cascade) fica órfã.
+  Só as faturas ainda `PENDENTE` desse contrato são canceladas (saem de "a
+  receber"); faturas `PAGO`/`ATRASADO` são preservadas como histórico. A
+  operação é sempre escopada por `contratoId` — nunca toca em faturas de
+  outro contrato, mesmo do mesmo inquilino/imóvel. Exige ADMIN logado.
 - **Fiador é verificado antes de vincular**: precisa existir, não estar
   soft-deletado e estar `ativo`; senão o contrato não é criado.
 - **Imóvel não pode ser alugado duas vezes**: contrato só é criado se o
@@ -114,7 +123,49 @@ quanto os cadastros (inquilino, fiador, imóvel, contrato).
 - CORS restrito à lista em `CORS_ORIGIN` (nunca `*`).
 - Limite de corpo de requisição em 100kb (`entity.too.large` → 413).
 - Rate limiting: 300 req/15min por IP em toda a API, 30 req/15min no endpoint
-  de pagamentos (alvo mais sensível a abuso).
+  de pagamentos, 10 req/15min em `/auth/login` (alvo natural de força bruta
+  de senha, mesmo com bcrypt).
+
+## Auditoria de código (revisão completa) — correções aplicadas
+
+- **`POST /contratos/:id/renovar` agora exige ADMIN**: essa rota encerra o
+  contrato atual internamente (mesma operação de `/encerrar`), então tinha
+  a mesma proteção que faltava — sem isso, um OPERADOR conseguia encerrar
+  qualquer contrato "por baixo" via renovação.
+- **Pagamento concorrente**: duas requisições simultâneas registrando
+  pagamento na mesma fatura agora usam `updateMany` com filtro de status em
+  vez de `update` incondicional — fecha a corrida em que ambas liam a
+  fatura como `PENDENTE` antes de qualquer uma escrever, o que permitia
+  criar dois registros de pagamento e creditar/debitar scoring em dobro.
+- **Aditivo contratual**: a leitura das faturas afetadas e a exclusão delas
+  passaram a acontecer dentro da mesma transação, reaplicando o filtro de
+  status na hora de excluir — fecha a corrida em que um pagamento registrado
+  entre a leitura e a exclusão apagaria uma fatura já paga.
+- **Exclusão de inquilino/fiador bloqueia se houver contrato ativo
+  vinculado** — antes disso passava batido e o contrato ficava
+  referenciando um cadastro "excluído" sem ninguém perceber.
+- **CPF/email "carimbados" na exclusão** (`nome_original__excluido_<timestamp>`):
+  como são `@unique` no schema, sem isso o valor original ficava
+  "reservado" para sempre por um registro invisível (soft-deletado), e
+  recadastrar a mesma pessoa depois de uma exclusão por engano virava
+  impossível.
+- **Defesa em profundidade em três pontos que só validavam no zod da
+  rota**: status de imóvel (`atualizarImovel` agora rejeita em runtime
+  qualquer valor fora de `DISPONIVEL`/`MANUTENCAO`, não só via tipo
+  TypeScript), papel de usuário (`ADMIN`/`OPERADOR`) e tipo de fatura
+  (`ALUGUEL`/`IPTU`) — uma chamada direta ao service (fora da rota HTTP)
+  não conseguia mais gravar um valor arbitrário.
+- **CSV injection**: campos que começam com `=`, `+`, `-`, `@` no export de
+  faturas agora são prefixados com apóstrofo — um nome de inquilino ou
+  endereço cadastrado como `=HYPERLINK(...)` não executa mais ao abrir o
+  CSV no Excel/Sheets.
+- **Vazamento de erro interno em `POST /faturas/gerar-mes`**: falhas por
+  contrato agora devolvem mensagem genérica ao cliente (a mensagem real só
+  vai para o log do servidor), fechando um caminho que contornava a
+  sanitização do `tratadorDeErros` central.
+- Índices adicionados em `Fatura` (`competencia`; `contratoId, status`;
+  `status, updatedAt`) e `Contrato` (`dataFim`) para os padrões de consulta
+  usados por dashboard, relatórios e pelas exclusões/aditivos.
 
 ## Configuração
 
@@ -130,4 +181,21 @@ quanto os cadastros (inquilino, fiador, imóvel, contrato).
 
 - SQLite em dev não tem criptografia em repouso; em produção, usar Postgres
   com disco criptografado (fora do escopo atual — ambiente é só local/dev).
+- **Geração de parcelas fora da transação em `criarContrato`/`renovarContrato`**:
+  se `gerarParcelasContrato` falhar depois que o contrato já foi criado (ex.:
+  processo cai no meio), o contrato existe e o imóvel fica `ALUGADO`, mas
+  algumas parcelas podem faltar — não há rollback automático disso. Baixo
+  risco na prática (a chamada é idempotente e pode ser reexecutada via
+  `POST /faturas/gerar/:contratoId`), mas envolveria mudar a assinatura de
+  várias funções do `faturaService` para aceitar o client de transação, o
+  que não foi feito nesta revisão para não arriscar quebrar outra coisa.
+- **N+1 na geração de parcelas**: cada mês gerado recarrega o contrato do
+  banco; um contrato de vários anos com IPTU faz dezenas de round-trips
+  sequenciais na criação. Funciona corretamente, só não é o mais rápido
+  possível.
+- **Bootstrap do primeiro admin não é atomicamente exclusivo**: duas
+  chamadas simultâneas a `registrar-primeiro-admin` com emails diferentes,
+  na fração de segundo em que o banco ainda não tem nenhum usuário,
+  poderiam ambas criar um ADMIN. Risco desprezível na prática (é uma ação
+  única, feita uma vez, por quem já tem acesso ao servidor).
 - `npm audit` está limpo (0 vulnerabilidades) na última checagem.

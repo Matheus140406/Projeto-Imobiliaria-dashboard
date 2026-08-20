@@ -38,17 +38,22 @@ export async function registrarAditivo(
     throw new AppError(422, "dataVigencia não pode ser retroativa");
   }
 
-  const faturasAfetadas = await prisma.fatura.findMany({
-    where: {
-      contratoId,
-      tipo: TipoFatura.ALUGUEL,
-      status: StatusFatura.PENDENTE,
-      dataVencimento: { gte: dados.dataVigencia },
-    },
-  });
-  const competenciasParaRegerar = faturasAfetadas.map((f) => f.competencia);
-
+  // A leitura das faturas afetadas e a exclusão delas acontecem dentro da MESMA
+  // transação, reaplicando o mesmo filtro `status: PENDENTE` na hora de excluir — evita
+  // a corrida em que um pagamento é registrado entre a leitura e a exclusão (o SQLite
+  // serializa escritas concorrentes durante uma transação aberta, então nada consegue
+  // pagar a fatura "no meio" desta operação; e mesmo que conseguisse, o filtro de status
+  // no deleteMany simplesmente não apagaria uma fatura que deixou de estar PENDENTE).
   const resultado = await prisma.$transaction(async (tx) => {
+    const faturasAfetadas = await tx.fatura.findMany({
+      where: {
+        contratoId,
+        tipo: TipoFatura.ALUGUEL,
+        status: StatusFatura.PENDENTE,
+        dataVencimento: { gte: dados.dataVigencia },
+      },
+    });
+
     const contratoAtualizado = await tx.contrato.update({
       where: { id: contratoId },
       data: {
@@ -58,7 +63,14 @@ export async function registrarAditivo(
     });
 
     if (faturasAfetadas.length > 0) {
-      await tx.fatura.deleteMany({ where: { id: { in: faturasAfetadas.map((f) => f.id) } } });
+      await tx.fatura.deleteMany({
+        where: {
+          contratoId,
+          tipo: TipoFatura.ALUGUEL,
+          status: StatusFatura.PENDENTE,
+          dataVencimento: { gte: dados.dataVigencia },
+        },
+      });
     }
 
     const aditivo = await tx.aditivo.create({
@@ -72,15 +84,25 @@ export async function registrarAditivo(
       },
     });
 
-    return { contratoAtualizado, aditivo };
+    return { contratoAtualizado, aditivo, competencias: faturasAfetadas.map((f) => f.competencia) };
   });
 
   // Recria, fora da transação (gerarFaturaMensal já é idempotente e tolerante a
   // corrida), as faturas de aluguel que foram removidas, agora com o valor/dia novo.
+  // Uma falha isolada numa competência não derruba as demais nem esconde que o
+  // aditivo já foi aplicado — fica registrado em `falhas` para quem chamou decidir
+  // se precisa gerar aquela parcela manualmente (ver POST /faturas/gerar/:contratoId).
   const faturasRegeradas = [];
-  for (const competencia of competenciasParaRegerar) {
-    const [ano, mes] = competencia.split("-").map(Number);
-    faturasRegeradas.push(await gerarFaturaMensal(prisma, contratoId, new Date(ano, mes - 1, 1)));
+  const falhas: { competencia: string; erro: string }[] = [];
+  for (const competencia of resultado.competencias) {
+    try {
+      const [ano, mes] = competencia.split("-").map(Number);
+      faturasRegeradas.push(await gerarFaturaMensal(prisma, contratoId, new Date(ano, mes - 1, 1)));
+    } catch (err) {
+      const mensagemSegura = err instanceof AppError ? err.message : "Erro interno ao regenerar fatura";
+      if (!(err instanceof AppError)) console.error(`Falha ao regenerar fatura ${competencia} do contrato ${contratoId}:`, err);
+      falhas.push({ competencia, erro: mensagemSegura });
+    }
   }
 
   await registrarLog(prisma, {
@@ -88,10 +110,10 @@ export async function registrarAditivo(
     entidadeId: contratoId,
     acao: "ADITIVO_REGISTRADO",
     usuario,
-    detalhes: dados,
+    detalhes: { ...dados, faturasRegeradas: faturasRegeradas.length, falhas },
   });
 
-  return { ...resultado, faturasRegeradas };
+  return { contratoAtualizado: resultado.contratoAtualizado, aditivo: resultado.aditivo, faturasRegeradas, falhas };
 }
 
 export async function listarAditivos(prisma: PrismaClient, contratoId: string) {

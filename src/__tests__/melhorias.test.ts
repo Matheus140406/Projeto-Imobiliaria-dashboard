@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { PrismaClient } from "@prisma/client";
 import { criarInquilino, atualizarInquilino } from "../cadastros/inquilinoService";
+import { criarFiador } from "../cadastros/fiadorService";
 import { criarImovel, atualizarImovel } from "../cadastros/imovelService";
 import { criarContrato, historicoParcelas } from "../cadastros/contratoService";
 import { avaliarDicasContrato, gerarPdfContrato, montarTextoContrato } from "../contratos/contratoDocumentoService";
@@ -459,5 +460,339 @@ describe("renovação de contrato: continuidade sem liberar o imóvel", () => {
     await expect(
       renovarContrato(prisma, contrato.id, { novaDataFim: new Date("2026-04-01") })
     ).rejects.toThrow();
+  });
+});
+
+describe("exclusão de contrato: exclusão lógica sem deixar registros órfãos", () => {
+  it("marca o contrato como EXCLUIDO, libera o imóvel e cancela só as faturas ainda PENDENTES", async () => {
+    const inquilino = await criarInquilino(prisma, { nome: "Inquilino Exclusao", cpf: CPF_1 });
+    const imovel = await criarImovel(prisma, { endereco: "Rua Exclusao, 1", valorPadrao: 1000 });
+    const contrato = await criarContrato(prisma, {
+      inquilinoId: inquilino.id,
+      imovelId: imovel.id,
+      valorAluguel: 1000,
+      diaVencimento: 5,
+      tipoGarantia: "CAUCAO",
+      valorCaucao: 3000,
+      dataInicio: new Date("2026-01-01"),
+      dataFim: new Date("2026-12-01"),
+    });
+
+    // Uma parcela é paga (deve ser preservada), as demais ficam PENDENTE (devem ser canceladas).
+    const parcelas = await historicoParcelas(prisma, contrato.id);
+    await registrarPagamento(prisma, {
+      faturaId: parcelas[0].id,
+      valorPago: parcelas[0].valorTotal,
+      metodo: "PIX",
+      registradoPor: "teste",
+    });
+
+    const { excluirContrato } = await import("../cadastros/contratoService");
+    const contratoExcluido = await excluirContrato(prisma, contrato.id, "usuario-teste");
+
+    expect(contratoExcluido.status).toBe("EXCLUIDO");
+    expect(contratoExcluido.deletedAt).not.toBeNull();
+
+    const imovelAtual = await prisma.imovel.findUniqueOrThrow({ where: { id: imovel.id } });
+    expect(imovelAtual.status).toBe("DISPONIVEL");
+
+    const faturasFinais = await prisma.fatura.findMany({ where: { contratoId: contrato.id } });
+    const paga = faturasFinais.find((f) => f.id === parcelas[0].id);
+    const outras = faturasFinais.filter((f) => f.id !== parcelas[0].id);
+    expect(paga?.status).toBe("PAGO");
+    expect(outras.every((f) => f.status === "CANCELADO")).toBe(true);
+
+    // Contrato some das listagens (soft delete), mas segue no banco (auditoria).
+    const listados = await import("../cadastros/contratoService").then((m) => m.listarContratos(prisma));
+    expect(listados.find((c) => c.id === contrato.id)).toBeUndefined();
+  });
+
+  it("não afeta faturas nem pagamentos de outro contrato ao excluir um contrato", async () => {
+    const inquilinoA = await criarInquilino(prisma, { nome: "Inquilino Exclusao A", cpf: CPF_1 });
+    const inquilinoB = await criarInquilino(prisma, { nome: "Inquilino Exclusao B", cpf: CPF_2 });
+    const imovelA = await criarImovel(prisma, { endereco: "Rua Exclusao A, 1", valorPadrao: 1000 });
+    const imovelB = await criarImovel(prisma, { endereco: "Rua Exclusao B, 1", valorPadrao: 1000 });
+
+    const contratoA = await criarContrato(prisma, {
+      inquilinoId: inquilinoA.id,
+      imovelId: imovelA.id,
+      valorAluguel: 1000,
+      diaVencimento: 5,
+      tipoGarantia: "CAUCAO",
+      valorCaucao: 3000,
+      dataInicio: new Date("2026-01-01"),
+      dataFim: new Date("2026-12-01"),
+    });
+    const contratoB = await criarContrato(prisma, {
+      inquilinoId: inquilinoB.id,
+      imovelId: imovelB.id,
+      valorAluguel: 1000,
+      diaVencimento: 5,
+      tipoGarantia: "CAUCAO",
+      valorCaucao: 3000,
+      dataInicio: new Date("2026-01-01"),
+      dataFim: new Date("2026-12-01"),
+    });
+
+    const { excluirContrato } = await import("../cadastros/contratoService");
+    await excluirContrato(prisma, contratoA.id, "usuario-teste");
+
+    const parcelasB = await historicoParcelas(prisma, contratoB.id);
+    expect(parcelasB.every((f) => f.status === "PENDENTE")).toBe(true);
+
+    const contratoBAtual = await prisma.contrato.findUniqueOrThrow({ where: { id: contratoB.id } });
+    expect(contratoBAtual.status).toBe("ATIVO");
+    expect(contratoBAtual.deletedAt).toBeNull();
+
+    const imovelBAtual = await prisma.imovel.findUniqueOrThrow({ where: { id: imovelB.id } });
+    expect(imovelBAtual.status).toBe("ALUGADO");
+  });
+
+  it("excluir um contrato já excluído (ou inexistente) retorna 404, não duplica efeitos", async () => {
+    const { excluirContrato } = await import("../cadastros/contratoService");
+    await expect(excluirContrato(prisma, "id-que-nao-existe", "usuario-teste")).rejects.toThrow(/não encontrado/);
+  });
+});
+
+describe("caução aceita qualquer valor (sem piso automático de 3x o aluguel)", () => {
+  it("salva exatamente o valor de caução informado, sem multiplicar ou arredondar para 3x", async () => {
+    const inquilino = await criarInquilino(prisma, { nome: "Inquilino Caucao Livre", cpf: CPF_1 });
+    const imovel = await criarImovel(prisma, { endereco: "Rua Caucao Livre, 1", valorPadrao: 2000 });
+
+    const contratoBaixo = await criarContrato(prisma, {
+      inquilinoId: inquilino.id,
+      imovelId: imovel.id,
+      valorAluguel: 2000,
+      diaVencimento: 5,
+      tipoGarantia: "CAUCAO",
+      valorCaucao: 500, // bem menor que 1x o aluguel, quanto mais 3x
+      dataInicio: new Date("2026-01-01"),
+      dataFim: new Date("2026-04-01"),
+    });
+
+    expect(contratoBaixo.valorCaucao).toBe(500);
+  });
+});
+
+describe("multa e juros por atraso: 10% fixo + 0,5% ao dia sobre o valor original", () => {
+  it("reproduz o exemplo de referência: R$1.000 com 5 dias de atraso -> R$100 de multa + R$25 de juros = R$1.125", async () => {
+    const { calcularMultaEJuros } = await import("../financeiro/calculoAtraso");
+
+    // Valores em centavos: R$1.000,00 = 100000.
+    const resultado = calcularMultaEJuros({
+      valorOriginal: 100000,
+      percentualMulta: 10,
+      taxaJurosDiaria: 0.5,
+      dataVencimento: new Date("2026-07-01"),
+      dataReferencia: new Date("2026-07-06"),
+    });
+
+    expect(resultado.diasAtraso).toBe(5);
+    expect(resultado.valorMulta).toBe(10000); // R$100,00
+    expect(resultado.valorJuros).toBe(2500); // R$25,00
+    expect(resultado.valorTotal).toBe(112500); // R$1.125,00
+  });
+
+  it("não aplica multa nem juros quando não há atraso", async () => {
+    const { calcularMultaEJuros } = await import("../financeiro/calculoAtraso");
+    const resultado = calcularMultaEJuros({
+      valorOriginal: 100000,
+      percentualMulta: 10,
+      taxaJurosDiaria: 0.5,
+      dataVencimento: new Date("2026-07-01"),
+      dataReferencia: new Date("2026-07-01"),
+    });
+    expect(resultado).toEqual({ diasAtraso: 0, valorMulta: 0, valorJuros: 0, valorTotal: 100000 });
+  });
+
+  it("multa fixa não dobra a cada dia — só os juros crescem com os dias de atraso", async () => {
+    const { calcularMultaEJuros } = await import("../financeiro/calculoAtraso");
+    const base = { valorOriginal: 100000, percentualMulta: 10, taxaJurosDiaria: 0.5, dataVencimento: new Date("2026-07-01") };
+
+    const dia1 = calcularMultaEJuros({ ...base, dataReferencia: new Date("2026-07-02") });
+    const dia10 = calcularMultaEJuros({ ...base, dataReferencia: new Date("2026-07-11") });
+
+    // Multa é sempre 10% do valor original, não importa quantos dias passaram.
+    expect(dia1.valorMulta).toBe(10000);
+    expect(dia10.valorMulta).toBe(10000);
+    // Só os juros escalam linearmente com os dias (0,5% ao dia sobre o valor original).
+    expect(dia1.valorJuros).toBe(500);
+    expect(dia10.valorJuros).toBe(5000);
+  });
+
+  it("contrato criado via API usa os novos padrões (10% de multa, 0,5% de juros ao dia) quando não especificado", async () => {
+    const inquilino = await criarInquilino(prisma, { nome: "Inquilino Padrao Multa", cpf: CPF_1 });
+    const imovel = await criarImovel(prisma, { endereco: "Rua Padrao Multa, 1", valorPadrao: 1000 });
+    const contrato = await criarContrato(prisma, {
+      inquilinoId: inquilino.id,
+      imovelId: imovel.id,
+      valorAluguel: 1000,
+      diaVencimento: 5,
+      tipoGarantia: "CAUCAO",
+      valorCaucao: 3000,
+      dataInicio: new Date("2026-01-01"),
+      dataFim: new Date("2026-04-01"),
+    });
+
+    expect(contrato.percentualMulta).toBe(10);
+    expect(contrato.taxaJurosDiaria).toBe(0.5);
+  });
+});
+
+describe("exclusão de inquilino/fiador: bloqueia com contrato ativo e libera CPF para recadastro", () => {
+  it("rejeita excluir inquilino que tem contrato ativo", async () => {
+    const inquilino = await criarInquilino(prisma, { nome: "Inquilino Vinculado", cpf: CPF_1 });
+    const imovel = await criarImovel(prisma, { endereco: "Rua Vinculado, 1", valorPadrao: 1000 });
+    await criarContrato(prisma, {
+      inquilinoId: inquilino.id,
+      imovelId: imovel.id,
+      valorAluguel: 1000,
+      diaVencimento: 5,
+      tipoGarantia: "CAUCAO",
+      valorCaucao: 3000,
+      dataInicio: new Date("2026-01-01"),
+      dataFim: new Date("2026-04-01"),
+    });
+
+    const { excluirInquilino } = await import("../cadastros/inquilinoService");
+    await expect(excluirInquilino(prisma, inquilino.id)).rejects.toThrow(/contrato ativo/);
+  });
+
+  it("libera o CPF do inquilino excluído para um novo cadastro com o mesmo CPF", async () => {
+    const inquilino = await criarInquilino(prisma, { nome: "Inquilino Reciclavel", cpf: CPF_1 });
+    const { excluirInquilino } = await import("../cadastros/inquilinoService");
+    await excluirInquilino(prisma, inquilino.id);
+
+    // Sem contrato vinculado, a exclusão funciona e o CPF original fica livre de novo.
+    const novoInquilino = await criarInquilino(prisma, { nome: "Pessoa Nova, Mesmo CPF", cpf: CPF_1 });
+    expect(novoInquilino.cpf).toBe(CPF_1);
+    expect(novoInquilino.id).not.toBe(inquilino.id);
+  });
+
+  it("rejeita excluir fiador que garante contrato ativo, e libera o CPF quando não há vínculo", async () => {
+    const inquilino = await criarInquilino(prisma, { nome: "Inquilino Fiador Teste", cpf: CPF_1 });
+    const fiador = await criarFiador(prisma, { nome: "Fiador Vinculado", cpf: CPF_2 });
+    const imovel = await criarImovel(prisma, { endereco: "Rua Fiador Teste, 1", valorPadrao: 1000 });
+    await criarContrato(prisma, {
+      inquilinoId: inquilino.id,
+      imovelId: imovel.id,
+      fiadorId: fiador.id,
+      valorAluguel: 1000,
+      diaVencimento: 5,
+      tipoGarantia: "FIADOR",
+      dataInicio: new Date("2026-01-01"),
+      dataFim: new Date("2026-04-01"),
+    });
+
+    const { excluirFiador } = await import("../cadastros/fiadorService");
+    await expect(excluirFiador(prisma, fiador.id)).rejects.toThrow(/contrato ativo/);
+
+    const fiadorLivre = await criarFiador(prisma, { nome: "Fiador Sem Contrato", cpf: CPF_3 });
+    await excluirFiador(prisma, fiadorLivre.id);
+    const recadastrado = await criarFiador(prisma, { nome: "Outra Pessoa, Mesmo CPF", cpf: CPF_3 });
+    expect(recadastrado.cpf).toBe(CPF_3);
+  });
+});
+
+describe("pagamento concorrente: só um dos dois vence a corrida", () => {
+  it("duas chamadas simultâneas de registrarPagamento na mesma fatura só processam uma", async () => {
+    const inquilino = await criarInquilino(prisma, { nome: "Inquilino Corrida", cpf: CPF_1 });
+    const imovel = await criarImovel(prisma, { endereco: "Rua Corrida, 1", valorPadrao: 1000 });
+    const contrato = await criarContrato(prisma, {
+      inquilinoId: inquilino.id,
+      imovelId: imovel.id,
+      valorAluguel: 1000,
+      diaVencimento: 5,
+      tipoGarantia: "CAUCAO",
+      valorCaucao: 3000,
+      dataInicio: new Date("2026-01-01"),
+      dataFim: new Date("2026-04-01"),
+    });
+    const parcelas = await historicoParcelas(prisma, contrato.id);
+    const fatura = parcelas[0];
+
+    const resultados = await Promise.allSettled([
+      registrarPagamento(prisma, {
+        faturaId: fatura.id,
+        valorPago: fatura.valorTotal,
+        metodo: "PIX",
+        registradoPor: "a",
+        dataPagamento: fatura.dataVencimento,
+      }),
+      registrarPagamento(prisma, {
+        faturaId: fatura.id,
+        valorPago: fatura.valorTotal,
+        metodo: "PIX",
+        registradoPor: "b",
+        dataPagamento: fatura.dataVencimento,
+      }),
+    ]);
+
+    const sucesso = resultados.filter((r) => r.status === "fulfilled");
+    const falha = resultados.filter((r) => r.status === "rejected");
+    expect(sucesso).toHaveLength(1);
+    expect(falha).toHaveLength(1);
+
+    // Só um Pagamento foi criado, e o scoring do inquilino só foi ajustado uma vez (+5).
+    const pagamentos = await prisma.pagamento.findMany({ where: { faturaId: fatura.id } });
+    expect(pagamentos).toHaveLength(1);
+    const inquilinoAtual = await prisma.inquilino.findUniqueOrThrow({ where: { id: inquilino.id } });
+    expect(inquilinoAtual.scoring).toBe(5);
+  });
+});
+
+describe("defesa em profundidade em chamadas diretas ao service (fora do zod da rota)", () => {
+  it("rejeita status de imóvel diferente de DISPONIVEL/MANUTENCAO mesmo passando o tipo por engano", async () => {
+    const imovel = await criarImovel(prisma, { endereco: "Rua Status Direto, 1", valorPadrao: 1000 });
+    const { atualizarImovel } = await import("../cadastros/imovelService");
+    await expect(
+      atualizarImovel(prisma, imovel.id, { status: "ALUGADO" as "DISPONIVEL" | "MANUTENCAO" })
+    ).rejects.toThrow(/DISPONIVEL ou MANUTENCAO/);
+  });
+
+  it("rejeita tipo de fatura fora de ALUGUEL/IPTU em chamada direta ao faturaService", async () => {
+    const inquilino = await criarInquilino(prisma, { nome: "Inquilino Tipo Fatura", cpf: CPF_1 });
+    const imovel = await criarImovel(prisma, { endereco: "Rua Tipo Fatura, 1", valorPadrao: 1000 });
+    const contrato = await criarContrato(prisma, {
+      inquilinoId: inquilino.id,
+      imovelId: imovel.id,
+      valorAluguel: 1000,
+      diaVencimento: 5,
+      tipoGarantia: "CAUCAO",
+      valorCaucao: 3000,
+      dataInicio: new Date("2026-01-01"),
+      dataFim: new Date("2026-04-01"),
+    });
+
+    const { gerarFaturaMensal } = await import("../financeiro/faturaService");
+    await expect(
+      gerarFaturaMensal(prisma, contrato.id, new Date("2026-05-01"), "SEGURO_INCENDIO")
+    ).rejects.toThrow(/tipo de fatura inválido/);
+  });
+
+  it("rejeita papel de usuário fora de ADMIN/OPERADOR em chamada direta ao authService", async () => {
+    const { criarUsuario } = await import("../auth/authService");
+    await expect(
+      criarUsuario(prisma, {
+        nome: "Usuario Papel Invalido",
+        email: "papel-invalido@teste.com",
+        senha: "12345678",
+        papel: "SUPERADMIN" as "ADMIN" | "OPERADOR",
+      })
+    ).rejects.toThrow(/ADMIN ou OPERADOR/);
+  });
+});
+
+describe("CSV: neutraliza início de fórmula para evitar CSV injection no Excel/Sheets", () => {
+  it("prefixa com apóstrofo campos que começam com =, +, -, @", async () => {
+    const { paraCsv } = await import("../lib/csv");
+    const csv = paraCsv(
+      [{ nome: "=HYPERLINK(\"http://evil\")" }, { nome: "+1234" }, { nome: "Nome Normal" }],
+      [{ chave: "nome", titulo: "Nome" }]
+    );
+    const linhas = csv.split("\n");
+    expect(linhas[1]).toBe('"\'=HYPERLINK(""http://evil"")"');
+    expect(linhas[2]).toBe("'+1234");
+    expect(linhas[3]).toBe("Nome Normal");
   });
 });

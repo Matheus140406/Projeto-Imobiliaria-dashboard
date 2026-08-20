@@ -82,10 +82,35 @@ export async function atualizarInquilino(
   }
 }
 
-/** Soft delete: preserva o histórico de contratos/faturas em vez de apagar o registro. */
+/**
+ * Soft delete: preserva o histórico de contratos/faturas em vez de apagar o registro.
+ *
+ * Bloqueia se houver contrato ativo vinculado — senão o contrato ficaria referenciando
+ * um inquilino "excluído" e faturas continuariam sendo geradas normalmente para ele
+ * todo mês, um estado inconsistente que ninguém vê pela listagem.
+ *
+ * CPF e email são "carimbados" com um sufixo no momento da exclusão (mantendo o valor
+ * original recuperável só via banco/auditoria). Sem isso, cpf/email `@unique` no schema
+ * bloqueariam para sempre um novo cadastro com o mesmo CPF — mesmo a pessoa já não
+ * existindo mais nas listagens, o valor continuaria "reservado" por um registro invisível.
+ */
 export async function excluirInquilino(prisma: PrismaClient, id: string, usuario = "desconhecido") {
-  await buscarInquilino(prisma, id);
-  const excluido = await prisma.inquilino.update({ where: { id }, data: { deletedAt: new Date() } });
+  const inquilino = await buscarInquilino(prisma, id);
+
+  const contratoAtivo = await prisma.contrato.findFirst({ where: { inquilinoId: id, deletedAt: null } });
+  if (contratoAtivo) {
+    throw new AppError(409, "Não é possível excluir um inquilino com contrato ativo");
+  }
+
+  const sufixo = `__excluido_${Date.now()}`;
+  const excluido = await prisma.inquilino.update({
+    where: { id },
+    data: {
+      deletedAt: new Date(),
+      cpf: `${inquilino.cpf}${sufixo}`,
+      email: inquilino.email ? `${inquilino.email}${sufixo}` : null,
+    },
+  });
   await registrarLog(prisma, { entidade: ENTIDADE, entidadeId: id, acao: "EXCLUIDO", usuario });
   return excluido;
 }

@@ -31,8 +31,14 @@ API (Dashboard, Financeiro, Contratos, Imóveis, Cadastros). Ver
   dígito verificador, único; email único), **Fiador** (CPF único, flag
   `ativo`), **Imóvel** (`DISPONIVEL` / `ALUGADO` / `MANUTENCAO`) e
   **Contrato**.
-- **Garantia obrigatória**: contrato só é criado se `caução ≥ 3x o aluguel`
-  **ou** houver um fiador ativo vinculado.
+- **Garantia obrigatória**: contrato só é criado se houver **caução (qualquer
+  valor maior que zero — não há piso automático de "3x o aluguel"; é uma
+  decisão comercial do usuário)** ou um fiador ativo vinculado.
+- **Exclusão de contrato**: exclusão lógica (soft delete), pensada para
+  contratos quebrados antes do prazo. Cancela as parcelas ainda pendentes
+  (saem de "a receber"), preserva faturas já pagas/atrasadas como histórico e
+  libera o imóvel se ele estava ocupado por este contrato. Exige ADMIN
+  logado, igual às outras exclusões.
 - **Geração automática de parcelas**: ao criar o contrato, uma fatura por mês
   de vigência já é criada (reaproveitando o motor de faturas do Matheus).
 - **IPTU**: se o imóvel tiver `valorIptuMensal` cadastrado e o contrato
@@ -65,9 +71,13 @@ API (Dashboard, Financeiro, Contratos, Imóveis, Cadastros). Ver
 ### Financeiro + Dashboard (Matheus)
 
 - Geração automática de fatura (aluguel e IPTU) por contrato/competência.
-- Cálculo de multa (% contratual) + juros (taxa diária) sobre faturas em
-  atraso — com endpoint de detalhe que mostra o cálculo transparente mesmo
-  antes do cron da madrugada rodar.
+- Cálculo de multa (% contratual, padrão **10%**) + juros de mora (% ao dia,
+  padrão **0,5% ao dia**) sobre faturas em atraso — ambos incidem sobre o
+  **valor original** da parcela (nunca sobre a própria multa ou sobre juros já
+  acumulados), e a multa é fixa (não dobra a cada dia — só os juros crescem
+  com os dias de atraso). Percentuais são configuráveis por contrato. Endpoint
+  de detalhe mostra o cálculo transparente mesmo antes do cron da madrugada
+  rodar.
 - Cron noturno (00:10) que marca `ATRASADO` toda fatura cujo vencimento + 1
   dia já ficou no passado (a partir do 2º dia corrido de atraso).
 - Registro de pagamento manual com auditoria (`AuditoriaPagamento`) e ajuste
@@ -138,13 +148,15 @@ de falhar.
 npm test
 ```
 
-71 testes automatizados (unitários + integração com SQLite + HTTP via
+91 testes automatizados (unitários + integração com SQLite + HTTP via
 supertest), cobrindo: cálculo de multa/juros (em centavos), geração/
-idempotência de faturas, pagamento parcial rejeitado, scoring com status
-desatualizado, concorrência, regra de garantia, disponibilidade de imóvel,
-sobreposição de datas, geração de parcelas (aluguel + IPTU), edição de
-cadastros, log de atividade, gerador de contrato (texto/PDF), soft delete,
-autenticação, conversão reais↔centavos, aditivo contratual, renovação de
+idempotência de faturas, pagamento parcial rejeitado, pagamento concorrente
+(só um vence a corrida), scoring com status desatualizado, concorrência,
+regra de garantia, disponibilidade de imóvel, sobreposição de datas, geração
+de parcelas (aluguel + IPTU), edição de cadastros, exclusão com bloqueio por
+contrato ativo, log de atividade, gerador de contrato (texto/PDF), soft
+delete, autenticação, RBAC (rota de renovação exige ADMIN), CSV injection,
+conversão reais↔centavos, aditivo contratual, renovação de
 contrato e não vazamento de erros internos.
 
 CI no GitHub Actions (`.github/workflows/ci.yml`) roda type check, testes e
@@ -162,9 +174,12 @@ build a cada push/PR.
 - `POST /api/contratos`, `GET /api/contratos`, `GET /api/contratos/:id`
 - `GET /api/contratos/:id/parcelas` — histórico de parcelas do contrato
 - `POST /api/contratos/:id/encerrar` — soft delete + libera o imóvel (exige ADMIN logado)
+- `DELETE /api/contratos/:id` — exclusão lógica do contrato (ex.: quebrado antes do
+  prazo); cancela parcelas ainda pendentes, preserva as já pagas/atrasadas como
+  histórico, libera o imóvel (exige ADMIN logado)
 - `POST /api/contratos/:id/aditivos` — registra aditivo (novo valor/vencimento a partir de uma data)
 - `GET /api/contratos/:id/aditivos` — histórico de aditivos do contrato
-- `POST /api/contratos/:id/renovar` — renova o contrato (encerra o atual, cria um novo vinculado)
+- `POST /api/contratos/:id/renovar` — renova o contrato (encerra o atual, cria um novo vinculado; exige ADMIN logado)
 - `GET /api/contratos/:id/documento/avisos` — dicas do que falta/é recomendado
 - `GET /api/contratos/:id/documento?formato=pdf|texto` — baixa o contrato
 

@@ -10,6 +10,9 @@ export const StatusContrato = {
   ATIVO: "ATIVO",
   ENCERRADO: "ENCERRADO",
   SUSPENSO: "SUSPENSO",
+  // Contrato removido pelo usuário (ex.: quebrado antes do prazo, cadastro
+  // duplicado/errado) — distinto de ENCERRADO, que é o fim natural do prazo.
+  EXCLUIDO: "EXCLUIDO",
 } as const;
 export type StatusContrato = (typeof StatusContrato)[keyof typeof StatusContrato];
 

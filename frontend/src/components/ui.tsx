@@ -21,6 +21,7 @@ const BADGE_MAP: Record<string, [string, string]> = {
   MANUTENCAO: ["badge-maint", "Manutenção"],
   ATIVO: ["badge-rented", "Ativo"],
   ENCERRADO: ["badge-cancel", "Encerrado"],
+  EXCLUIDO: ["badge-cancel", "Excluído"],
 };
 
 export function StatusBadge({ status }: { status: string }) {

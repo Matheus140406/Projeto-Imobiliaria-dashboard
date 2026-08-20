@@ -72,9 +72,24 @@ export async function atualizarFiador(
   return atualizado;
 }
 
+/**
+ * Soft delete. Bloqueia se o fiador ainda garante algum contrato ativo — senão o
+ * contrato ficaria vinculado a um fiador "excluído" sem ninguém perceber. O CPF é
+ * carimbado com um sufixo (mesma lógica de excluirInquilino) para liberar o valor
+ * original para um novo cadastro, já que é `@unique` no schema.
+ */
 export async function excluirFiador(prisma: PrismaClient, id: string, usuario = "desconhecido") {
-  await buscarFiador(prisma, id);
-  const excluido = await prisma.fiador.update({ where: { id }, data: { deletedAt: new Date() } });
+  const fiador = await buscarFiador(prisma, id);
+
+  const contratoAtivo = await prisma.contrato.findFirst({ where: { fiadorId: id, deletedAt: null } });
+  if (contratoAtivo) {
+    throw new AppError(409, "Não é possível excluir um fiador que garante um contrato ativo");
+  }
+
+  const excluido = await prisma.fiador.update({
+    where: { id },
+    data: { deletedAt: new Date(), cpf: `${fiador.cpf}__excluido_${Date.now()}` },
+  });
   await registrarLog(prisma, { entidade: ENTIDADE, entidadeId: id, acao: "EXCLUIDO", usuario });
   return excluido;
 }
