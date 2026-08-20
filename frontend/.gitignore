@@ -12,6 +12,13 @@ dist
 dist-ssr
 *.local
 
+# Nunca commitar variáveis de ambiente locais (VITE_API_KEY, VITE_API_URL) — mesmo a
+# API key sendo pública no bundle final, o .env local pode apontar para uma API_URL
+# interna/staging que não deveria vazar no histórico do repositório.
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

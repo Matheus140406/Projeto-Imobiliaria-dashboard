@@ -18,7 +18,9 @@ quanto os cadastros (inquilino, fiador, imóvel, contrato).
   alguém forje quem registrou um pagamento.
 - **RBAC leve com JWT**: existe agora um modelo `Usuario` (`ADMIN` |
   `OPERADOR`), com bootstrap único (`POST /api/auth/registrar-primeiro-admin`,
-  só funciona com zero usuários cadastrados), login
+  só funciona com zero usuários cadastrados **e** exige o header
+  `x-admin-bootstrap-token` batendo com `ADMIN_BOOTSTRAP_TOKEN` — ver
+  "Auditoria de código" abaixo para o porquê), login
   (`POST /api/auth/login`, senha com `bcrypt`, mensagem de erro idêntica para
   "usuário não existe" e "senha errada" para evitar enumeração de contas) e
   um JWT de 12h. A `x-api-key` continua sendo obrigatória para toda a
@@ -166,6 +168,21 @@ quanto os cadastros (inquilino, fiador, imóvel, contrato).
 - Índices adicionados em `Fatura` (`competencia`; `contratoId, status`;
   `status, updatedAt`) e `Contrato` (`dataFim`) para os padrões de consulta
   usados por dashboard, relatórios e pelas exclusões/aditivos.
+- **Bootstrap do primeiro admin era alcançável por qualquer pessoa com a
+  `x-api-key`** (revisão de 2026-08-20): essa chave é intencionalmente
+  embutida no bundle público do frontend (`VITE_API_KEY`, ver
+  `frontend/src/lib/api.ts`) — não é secreta no sentido de "só o servidor
+  sabe". Antes desta correção, `POST /auth/registrar-primeiro-admin` só
+  checava "zero usuários cadastrados" + essa chave pública, então qualquer
+  pessoa que extraísse a `x-api-key` do DevTools numa instância recém
+  implantada (antes do dono configurar sua conta) podia se registrar como o
+  ADMIN inicial primeiro. Agora a rota também exige o header
+  `x-admin-bootstrap-token` batendo com a env `ADMIN_BOOTSTRAP_TOKEN`
+  (comparação em tempo constante, mesmo padrão de `x-api-key`) — um segredo
+  que **nunca** vai para o frontend. Sem essa env configurada, a rota
+  responde 404 (endpoint desabilitado), o mesmo padrão já usado em
+  `CRON_SECRET`/`/cron/marcar-atrasadas`. Um rate limit dedicado (5/hora)
+  também foi adicionado à rota.
 
 ## Configuração
 
@@ -196,6 +213,8 @@ quanto os cadastros (inquilino, fiador, imóvel, contrato).
 - **Bootstrap do primeiro admin não é atomicamente exclusivo**: duas
   chamadas simultâneas a `registrar-primeiro-admin` com emails diferentes,
   na fração de segundo em que o banco ainda não tem nenhum usuário,
-  poderiam ambas criar um ADMIN. Risco desprezível na prática (é uma ação
-  única, feita uma vez, por quem já tem acesso ao servidor).
+  poderiam ambas criar um ADMIN. Agora que a rota também exige
+  `ADMIN_BOOTSTRAP_TOKEN` (ver "Auditoria de código"), só quem já tem esse
+  segredo consegue disparar a corrida — risco residual desprezível (o
+  próprio operador do deploy chamando a rota duas vezes por engano).
 - `npm audit` está limpo (0 vulnerabilidades) na última checagem.

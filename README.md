@@ -109,7 +109,10 @@ Além da `x-api-key` (que continua sendo o portão de rede da API inteira),
 agora existe um sistema de usuários leve com login e papéis:
 
 - `POST /api/auth/registrar-primeiro-admin` — cria o primeiro usuário
-  (sempre `ADMIN`); só funciona enquanto não existir nenhum usuário no banco.
+  (sempre `ADMIN`); só funciona enquanto não existir nenhum usuário no banco
+  **e** exige o header `x-admin-bootstrap-token` (valor da env
+  `ADMIN_BOOTSTRAP_TOKEN`, configurada só no servidor — nunca no frontend).
+  Sem essa env definida, a rota responde 404. Ver `SECURITY.md`.
 - `POST /api/auth/login` — retorna um JWT (`Authorization: Bearer <token>`,
   válido por 12h).
 - `POST /api/usuarios` — cria novos usuários (`ADMIN` ou `OPERADOR`); exige
